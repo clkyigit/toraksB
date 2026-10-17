@@ -1,7 +1,7 @@
 package com.clkyigit.toraksb.geometry
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.Test
 
 class ProneTest {
     /** Aynı hasta-tarafı girdileri yüzüstüde ekran yönünde ters açı verir. */

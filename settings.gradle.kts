@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "toraksB"
 include(":app")
+include(":shared")

@@ -76,7 +76,7 @@ object ImageGeometry {
             entryFromMidlineCm = midline?.let { abs(it) },
             entrySide = midline?.let { if (it >= 0) Side.LEFT else Side.RIGHT },
             cmPerPx = cmPerPx,
-            tableTiltDeg = Math.toDegrees(kotlin.math.atan2(h.y, h.x)),
+            tableTiltDeg = toDeg(kotlin.math.atan2(h.y, h.x)),
         )
     }
 }

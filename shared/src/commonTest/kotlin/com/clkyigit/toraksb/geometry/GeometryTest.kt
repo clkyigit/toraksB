@@ -1,9 +1,9 @@
 package com.clkyigit.toraksb.geometry
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import kotlin.test.Test
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -26,7 +26,7 @@ class GeometryTest {
             PlanInput(8.0, Side.RIGHT, 4.0, Side.RIGHT, verticalDepthCm = 4.0)
         )
         assertEquals(45.0, p.axialAngleDeg, eps)
-        assertEquals(Math.sqrt(32.0), p.depthCm, eps)
+        assertEquals(kotlin.math.sqrt(32.0), p.depthCm, eps)
     }
 
     @Test
@@ -60,7 +60,7 @@ class GeometryTest {
     /** Telefon dik, saat yönünün tersine t derece döndürülmüş: alt kenar (iğne ucu) ekranın sağına gider. */
     @Test
     fun phoneRotatedCounterClockwise_tipToRight() {
-        val t = Math.toRadians(30.0)
+        val t = toRad(30.0)
         val o = OrientationMath.needleOrientation(9.81 * sin(t), 9.81 * cos(t), 0.0, TableCalibration.NONE)
         assertEquals(30.0, o.axialDeg, 1e-6)
         assertEquals(0.0, o.craniocaudalDeg, 1e-6)
@@ -70,7 +70,7 @@ class GeometryTest {
     @Test
     fun tableTiltCancelsOut() {
         // Masa ekranın sağına (hastanın soluna) 3° yatık: sağ kenar alçak.
-        val r = Math.toRadians(3.0)
+        val r = toRad(3.0)
         val cal = TableCalibration.fromFlatGravity(-9.81 * sin(r), 0.0, 9.81 * cos(r))
         assertEquals(3.0, cal.lateralOffsetDeg, 1e-6)
         // Telefon masaya tam dik (masayla birlikte 3° sola yatık): masaya göre açı 0 olmalı.
@@ -84,9 +84,9 @@ class GeometryTest {
         val plan = PlanCalculator.compute(
             PlanInput(0.0, Side.RIGHT, 4.0, Side.LEFT, verticalDepthCm = 4.0, craniocaudalCm = 2.0)
         )
-        val len = Math.sqrt(36.0)
+        val len = kotlin.math.sqrt(36.0)
         val a = 4 / len; val b = 4 / len; val c = 2 / len
-        val s = Math.sqrt(1 - c * c)
+        val s = kotlin.math.sqrt(1 - c * c)
         val o = OrientationMath.needleOrientation(a / s, b, b * c / s, TableCalibration.NONE)
         assertEquals(plan.axialAngleDeg, o.axialDeg, 1e-6)
         assertEquals(plan.craniocaudalAngleDeg, o.craniocaudalDeg, 1e-6)

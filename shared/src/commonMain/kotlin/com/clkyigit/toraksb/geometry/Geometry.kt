@@ -68,7 +68,7 @@ data class NeedlePlan(
     val breathPhase: BreathPhase = BreathPhase.FREE,
     /** Plan girdileri ve görüntüden çıkan veriler (sütun adı → değer); çalışma kaydı ve özet için. */
     val details: Map<String, String> = emptyMap(),
-) : java.io.Serializable
+) : JvmSerializable
 
 object PlanCalculator {
     /**
@@ -77,7 +77,7 @@ object PlanCalculator {
      */
     fun toleranceFor(lesionSizeCm: Double?, pathCm: Double): Double? {
         if (lesionSizeCm == null || lesionSizeCm <= 0 || pathCm <= 0) return null
-        return Math.toDegrees(atan2(lesionSizeCm / 2, pathCm)).coerceIn(0.5, 10.0)
+        return toDeg(atan2(lesionSizeCm / 2, pathCm)).coerceIn(0.5, 10.0)
     }
 
     /**
@@ -149,8 +149,8 @@ object PlanCalculator {
         val d = verticalDepthCm
         val dz = craniocaudalCm
 
-        val axial = Math.toDegrees(atan2(dx, d))
-        val cc = Math.toDegrees(atan2(dz, hypot(dx, d)))
+        val axial = toDeg(atan2(dx, d))
+        val cc = toDeg(atan2(dz, hypot(dx, d)))
         val length = sqrt(dx * dx + d * d + dz * dz)
 
         return NeedlePlan(
@@ -185,11 +185,11 @@ data class TableCalibration(
     val upX: Double = 0.0,
     val upY: Double = 1.0,
     val upZ: Double = 0.0,
-) : java.io.Serializable {
+) : JvmSerializable {
     /** Gösterim için: masa dikeyinin gerçek dikeyden ekranın soluna (hastanın sağına) sapması. */
-    val lateralOffsetDeg: Double get() = Math.toDegrees(atan2(-upX, upY))
+    val lateralOffsetDeg: Double get() = toDeg(atan2(-upX, upY))
     /** Gösterim için: masa dikeyinin gerçek dikeyden kaudale sapması. */
-    val craniocaudalOffsetDeg: Double get() = Math.toDegrees(atan2(upZ, upY))
+    val craniocaudalOffsetDeg: Double get() = toDeg(atan2(upZ, upY))
 
     companion object {
         val NONE = TableCalibration()
@@ -251,8 +251,8 @@ object OrientationMath {
             if (abs(dAx) < 1e-10 && abs(dCc) < 1e-10) break
         }
         return NeedleOrientation(
-            axialDeg = Math.toDegrees(ax),
-            craniocaudalDeg = Math.toDegrees(cc),
+            axialDeg = toDeg(ax),
+            craniocaudalDeg = toDeg(cc),
             reliable = gy / g > 0.5, // iğne gerçek dikeyden ~60°'den fazla yatık değil
         )
     }

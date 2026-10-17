@@ -1,7 +1,7 @@
 package com.clkyigit.toraksb.geometry
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.Test
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -30,7 +30,7 @@ class ImageGeometryTest {
     /** Fotoğraf 10° döndürülmüş çekilmiş; masa hattı işaretlenince sonuç değişmemeli. */
     @Test
     fun rotatedPhotoWithTableLine() {
-        val a = Math.toRadians(10.0)
+        val a = toRad(10.0)
         fun rot(x: Double, y: Double) = Px(x * cos(a) - y * sin(a), x * sin(a) + y * cos(a))
         val m = ImageGeometry.measure(
             ImageMarks(

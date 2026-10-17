@@ -80,3 +80,16 @@ jobs:
           git add *.apk
           git commit -q -m "APK: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
           git push -f origin apk-build
+
+  # Ortak hesaplama kodunun testleri iOS simülatöründe (macOS)
+  ios-shared:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Ortak testler (iOS simülatörü)
+        run: ./gradlew :shared:iosSimulatorArm64Test --console=plain

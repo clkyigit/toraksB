@@ -99,9 +99,9 @@ class LesionMask(val imageWidth: Int, val imageHeight: Int, gridLong: Int = 512)
             centroid = centroid,
             aim = aim,
             aimIsCustom = target != null,
-            centerAngleDeg = Math.toDegrees(center),
-            marginRightDeg = Math.toDegrees(max(0.0, maxA)),
-            marginLeftDeg = Math.toDegrees(max(0.0, -minA)),
+            centerAngleDeg = toDeg(center),
+            marginRightDeg = toDeg(max(0.0, maxA)),
+            marginLeftDeg = toDeg(max(0.0, -minA)),
             partlyAboveEntry = above,
         )
     }

@@ -1,9 +1,9 @@
 package com.clkyigit.toraksb.geometry
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
-import org.junit.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.test.Test
 
 class LesionMaskTest {
     /** Girişin tam altında, 400 px uzakta, yarıçapı 40 px daire: tolerans ≈ asin(40/400) ≈ 5,74°. */
@@ -15,7 +15,7 @@ class LesionMaskTest {
         assertEquals(500.0, a.centroid.x, 0.5)
         assertEquals(500.0, a.centroid.y, 0.5)
         assertEquals(0.0, a.centerAngleDeg, 0.1)
-        val expected = Math.toDegrees(Math.asin(40.0 / 400.0))
+        val expected = toDeg(kotlin.math.asin(40.0 / 400.0))
         assertEquals(expected, a.marginLeftDeg, 0.3)
         assertEquals(expected, a.marginRightDeg, 0.3)
         assertEquals(expected, a.toleranceDeg, 0.3)
@@ -59,10 +59,10 @@ class LesionMaskCustomAimTest {
         val entry = Px(500.0, 100.0)
         val centered = m.analyze(entry)!!
         val shifted = m.analyze(entry, Px(530.0, 500.0))!!
-        org.junit.Assert.assertTrue(shifted.aimIsCustom)
-        org.junit.Assert.assertTrue(shifted.marginRightDeg < centered.marginRightDeg)
-        org.junit.Assert.assertTrue(shifted.marginLeftDeg > centered.marginLeftDeg)
-        org.junit.Assert.assertEquals(shifted.marginRightDeg, shifted.toleranceDeg, 1e-9)
+        kotlin.test.assertTrue(shifted.aimIsCustom)
+        kotlin.test.assertTrue(shifted.marginRightDeg < centered.marginRightDeg)
+        kotlin.test.assertTrue(shifted.marginLeftDeg > centered.marginLeftDeg)
+        kotlin.test.assertEquals(shifted.marginRightDeg, shifted.toleranceDeg, 1e-9)
     }
 
     /** Hedef lezyonun dışına konursa tolerans 0. */
@@ -71,6 +71,6 @@ class LesionMaskCustomAimTest {
         val m = LesionMask(1000, 1000, gridLong = 1000)
         m.stamp(Dab(500.0, 500.0, 40.0, erase = false))
         val a = m.analyze(Px(500.0, 100.0), Px(700.0, 500.0))!!
-        org.junit.Assert.assertEquals(0.0, a.toleranceDeg, 1e-9)
+        kotlin.test.assertEquals(0.0, a.toleranceDeg, 1e-9)
     }
 }
