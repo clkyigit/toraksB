@@ -1,11 +1,5 @@
 package com.clkyigit.toraksb.ui
 
-import android.content.Context
-import android.graphics.ImageDecoder
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -20,7 +14,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.platform.LocalDensity
-import com.clkyigit.toraksb.data.StudyLog
+import com.clkyigit.toraksb.data.StudyFormat
 import com.clkyigit.toraksb.geometry.BreathPhase
 import com.clkyigit.toraksb.geometry.Dab
 import com.clkyigit.toraksb.geometry.LesionAnalysis
@@ -70,11 +64,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -85,14 +77,13 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.content.FileProvider
 import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.PlanCalculator
 import com.clkyigit.toraksb.geometry.Px
 import com.clkyigit.toraksb.geometry.TableCalibration
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import java.io.File
+import com.clkyigit.toraksb.geometry.toRad
+import com.clkyigit.toraksb.platform.decodeImage
+import com.clkyigit.toraksb.platform.rememberPhotoSource
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -245,7 +236,7 @@ class ImagePlanState {
                 craniocaudalCm = cc, axialAngleOverrideDeg = angle,
             ).let { p ->
                 val m = mask
-                fun n(v: Double?, d: Int = 2) = StudyLog.num(v, d)
+                fun n(v: Double?, d: Int = 2) = StudyFormat.num(v, d)
                 p.copy(
                     toleranceDeg = a.toleranceDeg.coerceIn(0.5, 10.0),
                     prone = prone,
@@ -330,27 +321,6 @@ class ImagePlanState {
     }
 }
 
-private fun photoFile(context: Context): File =
-    File(context.cacheDir, "photos").apply { mkdirs() }.resolve("bt_${System.currentTimeMillis()}.jpg")
-
-private fun copyToCache(context: Context, uri: Uri): String? = runCatching {
-    val out = photoFile(context)
-    context.contentResolver.openInputStream(uri)!!.use { input -> out.outputStream().use { input.copyTo(it) } }
-    out.absolutePath
-}.getOrNull()
-
-/** EXIF yönünü uygular; en uzun kenarı 2048 px'e küçültür. */
-private fun decode(path: String): ImageBitmap? = runCatching {
-    ImageDecoder.decodeBitmap(ImageDecoder.createSource(File(path))) { decoder, info, _ ->
-        val longest = max(info.size.width, info.size.height)
-        if (longest > 2048) {
-            val k = 2048.0 / longest
-            decoder.setTargetSize((info.size.width * k).toInt().coerceAtLeast(1), (info.size.height * k).toInt().coerceAtLeast(1))
-        }
-        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-    }.asImageBitmap()
-}.getOrNull()
-
 @Composable
 fun ImagePlanScreen(
     state: ImagePlanState,
@@ -362,35 +332,17 @@ fun ImagePlanScreen(
     modifier: Modifier = Modifier,
     onStudy: () -> Unit = {},
 ) {
-    val context = LocalContext.current
-    var pendingCamera by remember { mutableStateOf<File?>(null) }
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
     var loadError by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
 
-    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        val f = pendingCamera
-        if (ok && f != null && f.length() > 0) state.newImage(f.absolutePath)
-        pendingCamera = null
-    }
-    val gallery = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) copyToCache(context, uri)?.let(state::newImage)
-    }
-    fun takePhoto() {
-        runCatching {
-            val f = photoFile(context)
-            pendingCamera = f
-            camera.launch(FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", f))
-        }.onFailure { loadError = true }
-    }
-    fun pickPhoto() {
-        runCatching { gallery.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-            .onFailure { loadError = true }
-    }
+    val photos = rememberPhotoSource(onImage = state::newImage, onError = { loadError = true })
+    fun takePhoto() = photos.takePhoto()
+    fun pickPhoto() = photos.pickPhoto()
 
     LaunchedEffect(state.imagePath) {
         val p = state.imagePath
-        image = if (p == null) null else withContext(Dispatchers.IO) { decode(p) }
+        image = if (p == null) null else decodeImage(p)
         loadError = p != null && image == null
         image?.let { state.ensureMask(it.width, it.height) }
     }
@@ -795,7 +747,7 @@ private fun DrawScope.drawOverlay(v: Viewport, s: ImagePlanState, a: LesionAnaly
         if (a.aimIsCustom) drawCircle(Color.White.copy(alpha = 0.5f), 4f, v.toScreen(a.centroid))
         val len = (c - e).getDistance() * 1.25f
         fun ray(offsetDeg: Double): Offset {
-            val ang = Math.toRadians(a.centerAngleDeg + offsetDeg)
+            val ang = toRad(a.centerAngleDeg + offsetDeg)
             return e + Offset((sin(ang) * len).toFloat(), (cos(ang) * len).toFloat())
         }
         drawLine(Color.Yellow.copy(alpha = 0.8f), e, ray(a.marginRightDeg), 2f, pathEffect = dash)

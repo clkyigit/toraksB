@@ -17,7 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.clkyigit.toraksb.data.StudyLog
+import com.clkyigit.toraksb.data.StudyFormat
 import com.clkyigit.toraksb.geometry.NeedlePlan
 
 /** Plana giren tüm veriler: doktorun girdikleri ve fotoğraftan çıkanlar. Katlanabilir. */
@@ -32,7 +32,7 @@ fun PlanDataCard(plan: NeedlePlan, extra: Map<String, String> = emptyMap()) {
             }
             if (open) {
                 Column(Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    StudyLog.COLUMNS.forEach { (key, label) ->
+                    StudyFormat.COLUMNS.forEach { (key, label) ->
                         val v = rows[key] ?: return@forEach
                         Row(Modifier.fillMaxWidth()) {
                             Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)

@@ -1,4 +1,6 @@
-package com.clkyigit.toraksb.data
+package com.clkyigit.toraksb.platform
+
+import com.clkyigit.toraksb.data.StudyFormat
 
 import android.content.Context
 import android.content.Intent
@@ -31,15 +33,10 @@ object StudyLog {
         f.appendText(sb.toString())
     }
 
-    fun count(c: Context): Int = runCatching {
+    /** Kayıtlar (eski → yeni). */
+    fun records(c: Context): List<Map<String, String>> = runCatching {
         val f = file(c)
-        if (!f.exists()) 0 else StudyFormat.records(f.readText()).size
-    }.getOrDefault(0)
-
-    /** Son kayıtlar (yeni → eski), ekranda kısa özet için. */
-    fun recent(c: Context, n: Int = 10): List<Map<String, String>> = runCatching {
-        val f = file(c)
-        if (!f.exists()) emptyList() else StudyFormat.records(f.readText()).takeLast(n).reversed()
+        if (!f.exists()) emptyList() else StudyFormat.records(f.readText())
     }.getOrDefault(emptyList())
 
     fun clear(c: Context) {

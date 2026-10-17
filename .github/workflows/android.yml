@@ -2,7 +2,7 @@ name: APK derle
 
 on:
   push:
-    branches-ignore: [apk-build, ci-log]
+    branches-ignore: [apk-build, ci-log, ci-log-ios]
   workflow_dispatch:
 
 permissions:
@@ -81,8 +81,8 @@ jobs:
           git commit -q -m "APK: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
           git push -f origin apk-build
 
-  # Ortak hesaplama kodunun testleri iOS simülatöründe (macOS)
-  ios-shared:
+  # iOS: ortak testler simülatörde + uygulamanın simülatör derlemesi (imzasız)
+  ios:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,4 +92,32 @@ jobs:
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
       - name: Ortak testler (iOS simülatörü)
-        run: ./gradlew :shared:iosSimulatorArm64Test --console=plain
+        run: |
+          set -o pipefail
+          ./gradlew :shared:iosSimulatorArm64Test --console=plain 2>&1 | tee /tmp/ios.log
+      - name: Xcode projesi oluştur
+        run: |
+          brew install xcodegen
+          cd iosApp && xcodegen generate
+      - name: iOS uygulamasını derle (simülatör)
+        run: |
+          set -o pipefail
+          cd iosApp
+          xcodebuild -project iosApp.xcodeproj -scheme iosApp -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build 2>&1 | tee -a /tmp/ios.log | tail -40
+      - name: Hata kaydını yayınla
+        if: failure()
+        run: |
+          mkdir -p /tmp/ci
+          grep -E "error:|e: |warning: unable|FAILED|BUILD FAILED|\*\* BUILD" /tmp/ios.log > /tmp/ci/ios_errors.log || true
+          tail -300 /tmp/ios.log > /tmp/ci/ios_tail.log || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan ci-log-ios
+          git rm -rf -q . || true
+          git clean -fdxq
+          cp /tmp/ci/* .
+          git add -A
+          git commit -q -m "iOS hata kaydı: ${GITHUB_SHA::7}"
+          git push -f origin ci-log-ios

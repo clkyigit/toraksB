@@ -26,11 +26,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.clkyigit.toraksb.BuildInfo
-import com.clkyigit.toraksb.data.StudyLog
+import com.clkyigit.toraksb.platform.BuildInfo
+import com.clkyigit.toraksb.platform.nowTimestamp
+import com.clkyigit.toraksb.platform.rememberStudyStore
+import com.clkyigit.toraksb.data.StudyFormat
 import com.clkyigit.toraksb.geometry.NeedleOrientation
 import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.TableCalibration
@@ -49,7 +50,7 @@ fun StudySaveCard(
     calibrated: Boolean,
     source: SensorSource?,
 ) {
-    val context = LocalContext.current
+    val store = rememberStudyStore()
     var open by rememberSaveable { mutableStateOf(false) }
     var caseCode by rememberSaveable { mutableStateOf("") }
     var result by rememberSaveable { mutableStateOf("") }
@@ -91,9 +92,9 @@ fun StudySaveCard(
             )
             Button(
                 onClick = {
-                    fun n(v: Double?) = StudyLog.num(v)
+                    fun n(v: Double?) = StudyFormat.num(v)
                     val row = plan.details + linkedMapOf(
-                        "kayit_zamani" to StudyLog.now(),
+                        "kayit_zamani" to nowTimestamp(),
                         "vaka_kodu" to caseCode.trim(),
                         "masa_yana_derece" to n(calibration.lateralOffsetDeg),
                         "masa_bas_ayak_derece" to n(calibration.craniocaudalOffsetDeg),
@@ -109,8 +110,8 @@ fun StudySaveCard(
                         "uygulama_surumu" to BuildInfo.VERSION,
                     )
                     savedMsg = runCatching {
-                        StudyLog.append(context, row)
-                        "Kaydedildi. Toplam ${StudyLog.count(context)} kayıt."
+                        store.append(row)
+                        "Kaydedildi. Toplam ${store.records().size} kayıt."
                     }.getOrElse { "Kaydedilemedi: ${it.message}" }
                     open = false
                     note = ""
@@ -124,12 +125,13 @@ fun StudySaveCard(
 /** Kayıtlı çalışma verileri: sayı, son kayıtlar, CSV paylaşma, silme. */
 @Composable
 fun StudyScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
+    val store = rememberStudyStore()
     var version by remember { mutableIntStateOf(0) }
     var confirmDelete by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    val count = remember(version) { StudyLog.count(context) }
-    val recent = remember(version) { StudyLog.recent(context, 20) }
+    val all = remember(version) { store.records() }
+    val count = all.size
+    val recent = all.takeLast(20).reversed()
 
     Column(
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -143,8 +145,7 @@ fun StudyScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
-                    error = runCatching { StudyLog.shareIntent(context)?.let(context::startActivity) }
-                        .exceptionOrNull()?.let { "Paylaşılamadı: ${it.message}" }
+                    error = store.share()
                 },
                 enabled = count > 0,
             ) { Text("CSV'yi paylaş") }
@@ -157,7 +158,7 @@ fun StudyScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                     Text("$count kayıt kalıcı olarak silinecek. Önce CSV'yi paylaşıp yedeklediğinizden emin olun.")
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { confirmDelete = false }) { Text("Vazgeç") }
-                        Button(onClick = { StudyLog.clear(context); confirmDelete = false; version++ }) { Text("Sil") }
+                        Button(onClick = { store.clear(); confirmDelete = false; version++ }) { Text("Sil") }
                     }
                 }
             }

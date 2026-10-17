@@ -7,21 +7,9 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
-
-/** Telefon koordinatında "yukarı" yönünü gösteren yerçekimi vektörü (m/s²). */
-data class Gravity(val x: Double, val y: Double, val z: Double) {
-    companion object { val ZERO = Gravity(0.0, 0.0, 0.0) }
-}
-
-enum class SensorSource(val label: String) {
-    GYRO_FUSION("Jiroskop + ivmeölçer"),
-    GRAVITY("Yerçekimi sensörü"),
-    ACCELEROMETER("Yalnız ivmeölçer"),
-}
 
 /**
  * Yön kaynağı, en iyiden başlayarak:
@@ -94,13 +82,8 @@ class GravitySensor(context: Context, private val onUpdate: (Gravity) -> Unit) :
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 }
 
-class GravityState(val gravity: State<Gravity>, val available: Boolean, val source: SensorSource?) {
-    /** Eski çağrılar için: füzyonlu (temiz) kaynak mı. */
-    val fused: Boolean get() = source != SensorSource.ACCELEROMETER
-}
-
 @Composable
-fun rememberGravity(): GravityState {
+actual fun rememberGravity(): GravityState {
     val context = LocalContext.current
     val state = remember { mutableStateOf(Gravity.ZERO) }
     val sensor = remember { GravitySensor(context) { state.value = it } }

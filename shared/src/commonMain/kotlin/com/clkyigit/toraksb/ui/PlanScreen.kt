@@ -24,6 +24,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,14 +36,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.clkyigit.toraksb.data.StudyLog
+import com.clkyigit.toraksb.data.StudyFormat
 import com.clkyigit.toraksb.geometry.BreathPhase
 import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.PlanCalculator
 import com.clkyigit.toraksb.geometry.PlanInput
 import com.clkyigit.toraksb.geometry.Side
 import com.clkyigit.toraksb.geometry.TableCalibration
-import java.util.Locale
 import kotlin.math.abs
 
 /** Form alanları metin olarak tutulur; virgül veya nokta ondalık ayırıcı olabilir. */
@@ -104,7 +104,8 @@ class PlanFormState {
 
 internal fun String.num(): Double? = trim().replace(',', '.').toDoubleOrNull()?.takeIf { it >= 0 }
 
-internal fun Double.f1(): String = String.format(Locale("tr"), "%.1f", this)
+/** Bir ondalıklı, virgül ayraçlı (Türkçe) gösterim. */
+internal fun Double.f1(): String = StudyFormat.num(this, 1).replace('.', ',')
 
 /**
  * + açı = ekranın sağı. Sırtüstü hastada ekranın sağı hastanın SOLU, yüzüstüde (sırttan giriş) SAĞI.
@@ -128,11 +129,12 @@ fun PlanScreen(
     onCalibrate: () -> Unit,
     onStart: (NeedlePlan) -> Unit,
     modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
 ) {
     val input = form.toInput()
     val plan = input?.let { runCatching { PlanCalculator.compute(it) }.getOrNull() }?.let { p ->
         val lesion = form.lesionCm.num()?.takeIf { it > 0 }
-        fun n(v: Double?) = StudyLog.num(v)
+        fun n(v: Double?) = StudyFormat.num(v)
         p.copy(
             toleranceDeg = PlanCalculator.toleranceFor(lesion, p.depthCm),
             lesionSizeCm = lesion,
@@ -169,6 +171,7 @@ fun PlanScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        onBack?.let { TextButton(onClick = it) { Text("‹ Görüntüden plana dön") } }
         Text("Elle giriş (yedek)", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text("BT konsolunda ölçtüğünüz değerleri girin. Görüntüden planlamaya dönmek için geri tuşunu kullanın.", style = MaterialTheme.typography.bodySmall)
         DisclaimerCard()

@@ -1,7 +1,5 @@
 package com.clkyigit.toraksb.ui
 
-import android.os.Build
-import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,7 +37,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import com.clkyigit.toraksb.platform.KeepScreenOn
+import com.clkyigit.toraksb.geometry.toRad
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -83,16 +84,11 @@ fun GuideScreen(
     val ccOk = !checkCc || ccWithin
     val allOk = o.reliable && axialOk && ccOk
 
-    val view = LocalView.current
-    DisposableEffect(Unit) {
-        view.keepScreenOn = true
-        onDispose { view.keepScreenOn = false }
-    }
+    KeepScreenOn()
+    val haptic = LocalHapticFeedback.current
     LaunchedEffect(allOk) {
         if (allOk) {
-            val c = if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM
-            else HapticFeedbackConstants.LONG_PRESS
-            view.performHapticFeedback(c)
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
         }
     }
 
@@ -276,7 +272,7 @@ private fun DrawScope.needle(center: Offset, r: Float, deg: Double, color: Color
 
 /** deg: aşağı yönden, ekranın sağına + . Ekran koordinatında y aşağı doğru artar. */
 private fun polar(c: Offset, r: Float, deg: Double): Offset {
-    val t = Math.toRadians(deg)
+    val t = toRad(deg)
     return Offset(c.x + r * sin(t).toFloat(), c.y + r * cos(t).toFloat())
 }
 

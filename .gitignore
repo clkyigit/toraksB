@@ -13,3 +13,8 @@
 *.jks
 *.keystore
 keystore.properties
+iosApp/iosApp.xcodeproj/
+iosApp/iosApp/Info.plist
+xcuserdata/
+DerivedData/
+.kotlin/

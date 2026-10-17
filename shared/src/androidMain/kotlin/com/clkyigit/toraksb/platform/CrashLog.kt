@@ -1,4 +1,4 @@
-package com.clkyigit.toraksb
+package com.clkyigit.toraksb.platform
 
 import android.content.Context
 import java.io.File
@@ -27,8 +27,4 @@ object CrashLog {
     fun clear(c: Context) {
         runCatching { file(c).delete() }
     }
-}
-
-object BuildInfo {
-    const val VERSION = "0.9.2"
 }

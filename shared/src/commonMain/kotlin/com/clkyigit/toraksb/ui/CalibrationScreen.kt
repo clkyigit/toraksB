@@ -27,6 +27,7 @@ import com.clkyigit.toraksb.geometry.TableCalibration
 import com.clkyigit.toraksb.sensor.rememberGravity
 import kotlinx.coroutines.flow.takeWhile
 import kotlin.math.sqrt
+import kotlin.time.TimeSource
 
 private const val CAL_DURATION_MS = 2000L
 
@@ -48,15 +49,15 @@ fun CalibrationScreen(
 
     LaunchedEffect(collecting) {
         if (!collecting) return@LaunchedEffect
-        val start = System.currentTimeMillis()
+        val mark = TimeSource.Monotonic.markNow()
         var sx = 0.0; var sy = 0.0; var sz = 0.0; var n = 0
         var minZ = Double.MAX_VALUE; var maxZ = -Double.MAX_VALUE
         snapshotFlow { g.gravity.value }
-            .takeWhile { System.currentTimeMillis() - start < CAL_DURATION_MS }
+            .takeWhile { mark.elapsedNow().inWholeMilliseconds < CAL_DURATION_MS }
             .collect {
                 sx += it.x; sy += it.y; sz += it.z; n++
                 minZ = minOf(minZ, it.z); maxZ = maxOf(maxZ, it.z)
-                progress = ((System.currentTimeMillis() - start).toFloat() / CAL_DURATION_MS).coerceAtMost(1f)
+                progress = (mark.elapsedNow().inWholeMilliseconds.toFloat() / CAL_DURATION_MS).coerceAtMost(1f)
             }
         collecting = false
         progress = 0f
