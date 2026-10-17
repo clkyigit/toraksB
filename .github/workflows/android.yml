@@ -2,7 +2,7 @@ name: APK derle
 
 on:
   push:
-    branches-ignore: [apk-build, ci-log, ci-log-ios]
+    branches-ignore: [apk-build, ci-log, ci-log-ios, ipa-build]
   workflow_dispatch:
 
 permissions:
@@ -81,9 +81,10 @@ jobs:
           git commit -q -m "APK: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
           git push -f origin apk-build
 
-  # iOS: ortak testler simülatörde + uygulamanın simülatör derlemesi (imzasız)
+  # iOS: ortak testler, simülatörde açılış ekran görüntüsü ve iPhone için imzasız .ipa
   ios:
     runs-on: macos-latest
+    needs: build
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v5
@@ -99,19 +100,57 @@ jobs:
         run: |
           brew install xcodegen
           cd iosApp && xcodegen generate
-      - name: iOS uygulamasını derle (simülatör)
+      - name: Simülatör derlemesi
         run: |
           set -o pipefail
           cd iosApp
           xcodebuild -project iosApp.xcodeproj -scheme iosApp -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build 2>&1 | tee -a /tmp/ios.log | tail -40
+            -derivedDataPath build/sim ARCHS=arm64 CODE_SIGNING_ALLOWED=NO build 2>&1 | tee -a /tmp/ios.log | tail -20
+      - name: Simülatörde aç ve ekran görüntüsü al
+        run: |
+          mkdir -p /tmp/out
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          APP=$(find iosApp/build/sim -name "iosApp.app" -type d | head -1)
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" com.clkyigit.toraksb
+          sleep 20
+          xcrun simctl io "$UDID" screenshot /tmp/out/ios_ekran.png
+      - name: iPhone derlemesi (imzasız .ipa)
+        run: |
+          set -o pipefail
+          cd iosApp
+          xcodebuild -project iosApp.xcodeproj -scheme iosApp -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dev ARCHS=arm64 CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build 2>&1 | tee -a /tmp/ios.log | tail -20
+          APP=$(find build/dev -name "iosApp.app" -type d -path "*iphoneos*" | head -1)
+          rm -rf /tmp/ipa && mkdir -p /tmp/ipa/Payload
+          cp -R "$APP" /tmp/ipa/Payload/
+          (cd /tmp/ipa && zip -qry /tmp/out/toraksB-${GITHUB_REF_NAME}.ipa Payload)
+          ls -la /tmp/out
+      - name: .ipa ve ekran görüntüsünü yayınla
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}-apk" /tmp/out/toraksB-${GITHUB_REF_NAME}.ipa --clobber || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan ipa-build
+          git rm -rf -q . || true
+          git clean -fdxq
+          cp /tmp/out/* .
+          git add -A
+          git commit -q -m "iOS: ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}"
+          git push -f origin ipa-build
       - name: Hata kaydını yayınla
         if: failure()
         run: |
           mkdir -p /tmp/ci
-          grep -E "error:|e: |warning: unable|FAILED|BUILD FAILED|\*\* BUILD" /tmp/ios.log > /tmp/ci/ios_errors.log || true
+          grep -E "error:|e: |FAILED|BUILD FAILED|\*\* BUILD" /tmp/ios.log > /tmp/ci/ios_errors.log || true
           tail -300 /tmp/ios.log > /tmp/ci/ios_tail.log || true
+          cp /tmp/out/*.png /tmp/ci/ 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout --orphan ci-log-ios

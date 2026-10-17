@@ -18,3 +18,4 @@ iosApp/iosApp/Info.plist
 xcuserdata/
 DerivedData/
 .kotlin/
+iosApp/build/
