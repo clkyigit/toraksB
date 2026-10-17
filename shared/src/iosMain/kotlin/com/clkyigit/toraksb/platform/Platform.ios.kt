@@ -46,6 +46,7 @@ import platform.UIKit.UIImagePickerControllerOriginalImage
 import platform.UIKit.UIImagePickerControllerSourceType
 import platform.UIKit.UINavigationControllerDelegateProtocol
 import platform.UIKit.UIViewController
+import platform.UIKit.popoverPresentationController
 import platform.darwin.NSObject
 import platform.posix.memcpy
 import kotlin.math.max
