@@ -76,9 +76,9 @@ fun GuideScreen(
     val ccDiff = plan.craniocaudalAngleDeg - o.craniocaudalDeg
     // Histerezis: hedefe girince yeşil yanar, ancak toleransın 1,5 katı aşılınca söner (titreme olmaz)
     val axialOk = rememberWithin(abs(axialDiff), tolerance)
-    // Planda kranyokaudal açı yoksa (aksiyel giriş) kranyokaudal yön gantri lazeriyle kontrol edilir;
-    // yeşil ışık yalnız aksiyel açıya bakar. Telefonu ekranı görmek için geriye yatırmak böylece hata sayılmaz.
-    var checkCc by rememberSaveable(plan) { mutableStateOf(abs(plan.craniocaudalAngleDeg) >= 1.0) }
+    // Telefonun uzun ekseni iğneye her yönden paralel olmalı: varsayılan olarak iki açı da kontrol edilir.
+    // İstenirse kranyokaudal kontrol kapatılıp gantri lazerine bırakılabilir.
+    var checkCc by rememberSaveable(plan) { mutableStateOf(true) }
     val ccWithin = rememberWithin(abs(ccDiff), tolerance)
     val ccOk = !checkCc || ccWithin
     val allOk = o.reliable && axialOk && ccOk
@@ -169,8 +169,8 @@ fun GuideScreen(
             AngleRow(
                 title = "Kranyokaudal",
                 target = plan.craniocaudalAngleDeg, current = o.craniocaudalDeg, ok = ccWithin,
-                instruction = if (ccDiff > 0) "Ucu KAUDALE (kendinize doğru) eğin"
-                else "Ucu KRANİALE (gantriye doğru) eğin",
+                instruction = if (ccDiff > 0) "Telefonun alt kenarını kendinize doğru eğin"
+                else "Telefonun alt kenarını gantriye doğru eğin; telefonu geriye yatırmayın",
                 word = ::ccWord,
             )
         } else {
@@ -200,9 +200,9 @@ fun GuideScreen(
         Slider(value = tolerance, onValueChange = { tolerance = it }, valueRange = 0.5f..10f, steps = 18)
 
         Text(
-            "Telefon steril alanın dışında tutulur, iğneye dokunmaz. Telefonu iğnenin yanında, ekranı ayak ucuna bakacak " +
-                    "şekilde (gantri lazeriyle aynı aksiyel düzlemde) tutup hedef açıya getirin. Çerçeve yeşil olunca iğneyi " +
-                    "telefonun uzun kenarına paralel ilerletin. Ekrandaki görünüm BT aksiyel görüntüsüyle aynı yöndedir.",
+            "Telefon steril alanın dışında tutulur, iğneye dokunmaz. Telefonun uzun ekseni iğneye her yönden paralel olmalı: " +
+                    "şarj girişi aşağıda (iğne ucu tarafı), ekran ayak ucuna bakar. Telefonu ekranı görmek için geriye yatırmayın; " +
+                    "dik tutup hedef açıya getirin. Çerçeve yeşil olunca iğneyi telefonun uzun kenarına paralel ilerletin.",
             style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
         )
         if (!calibrated) {
