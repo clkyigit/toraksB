@@ -33,6 +33,7 @@ import com.clkyigit.toraksb.BuildInfo
 import com.clkyigit.toraksb.data.StudyLog
 import com.clkyigit.toraksb.geometry.NeedleOrientation
 import com.clkyigit.toraksb.geometry.NeedlePlan
+import com.clkyigit.toraksb.geometry.RespStats
 import com.clkyigit.toraksb.geometry.TableCalibration
 import com.clkyigit.toraksb.sensor.SensorSource
 
@@ -48,6 +49,8 @@ fun StudySaveCard(
     calibration: TableCalibration,
     calibrated: Boolean,
     source: SensorSource?,
+    axResp: RespStats? = null,
+    ccResp: RespStats? = null,
 ) {
     val context = LocalContext.current
     var open by rememberSaveable { mutableStateOf(false) }
@@ -103,6 +106,12 @@ fun StudySaveCard(
                         "kk_aci_olculen" to n(current.craniocaudalDeg),
                         "aksiyel_sapma" to n(current.axialDeg - plan.axialAngleDeg),
                         "hedefte" to if (inTolerance) "evet" else "hayir",
+                        "solunum_saptandi" to if (axResp?.breathing == true || ccResp?.breathing == true) "evet" else "hayir",
+                        "solunum_aksiyel_genlik" to n(axResp?.amplitude),
+                        "solunum_kk_genlik" to n(ccResp?.amplitude),
+                        "plato_aksiyel_aci" to n(axResp?.takeIf { it.breathing }?.plateau),
+                        "plato_kk_aci" to n(ccResp?.takeIf { it.breathing }?.plateau),
+                        "plato_aksiyel_sapma" to n(axResp?.takeIf { it.breathing }?.let { it.plateau - plan.axialAngleDeg }),
                         "sonuc_bt" to result,
                         "not" to note.replace('\n', ' ').replace('\r', ' ').trim(),
                         "uygulama_surumu" to BuildInfo.VERSION,

@@ -34,7 +34,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.clkyigit.toraksb.data.StudyLog
+import com.clkyigit.toraksb.geometry.BreathPhase
 import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.PlanCalculator
 import com.clkyigit.toraksb.geometry.PlanInput
@@ -59,6 +61,7 @@ class PlanFormState {
     var angleTowardLeft by mutableStateOf(true)
     var lesionCm by mutableStateOf("")
     var prone by mutableStateOf(false)
+    var breathPhase by mutableStateOf(BreathPhase.FREE)
 
     fun toInput(): PlanInput? {
         val entry = entryCm.num() ?: return null
@@ -80,7 +83,7 @@ class PlanFormState {
             save = {
                 listOf(it.entryCm, it.entrySide.name, it.targetCm, it.targetSide.name,
                     it.verticalDepthCm, it.ccCm, it.ccCaudal, it.manualDepth, it.depthOverride,
-                    it.manualAngle, it.angleOverride, it.angleTowardLeft, it.lesionCm, it.prone)
+                    it.manualAngle, it.angleOverride, it.angleTowardLeft, it.lesionCm, it.prone, it.breathPhase.name)
             },
             restore = { l ->
                 PlanFormState().apply {
@@ -92,6 +95,7 @@ class PlanFormState {
                     angleTowardLeft = l[11] as Boolean
                     lesionCm = l.getOrNull(12) as? String ?: ""
                     prone = l.getOrNull(13) as? Boolean ?: false
+                    breathPhase = (l.getOrNull(14) as? String)?.let { n -> runCatching { BreathPhase.valueOf(n) }.getOrNull() } ?: BreathPhase.FREE
                 }
             },
         )
@@ -133,11 +137,13 @@ fun PlanScreen(
             toleranceDeg = PlanCalculator.toleranceFor(lesion, p.depthCm),
             lesionSizeCm = lesion,
             prone = form.prone,
+            breathPhase = form.breathPhase,
             skinMarkCm = form.entryCm.num(),
             skinMarkLeft = form.entrySide == Side.LEFT,
             details = linkedMapOf(
                 "kaynak" to "elle",
                 "hasta_pozisyonu" to if (form.prone) "yuzustu" else "sirtustu",
+                "solunum_fazi" to form.breathPhase.csv,
                 "giris_orta_hat_cm" to n(form.entryCm.num()),
                 "giris_taraf" to if (form.entrySide == Side.LEFT) "sol" else "sag",
                 "hedef_orta_hat_cm" to n(form.targetCm.num()),
@@ -167,6 +173,7 @@ fun PlanScreen(
         Text("BT konsolunda ölçtüğünüz değerleri girin. Görüntüden planlamaya dönmek için geri tuşunu kullanın.", style = MaterialTheme.typography.bodySmall)
         DisclaimerCard()
         PositionSelector(form.prone) { form.prone = it }
+        BreathPhaseSelector(form.breathPhase) { form.breathPhase = it }
 
         SectionTitle("Cilt giriş noktası")
         CmField("Orta hatta uzaklık (cm)", form.entryCm) { form.entryCm = it }
@@ -324,6 +331,24 @@ internal fun PositionSelector(prone: Boolean, onChange: (Boolean) -> Unit) {
             else OutlinedButton(onClick = { onChange(false) }, modifier = Modifier.weight(1f)) { Text("Sırtüstü") }
             if (prone) Button(onClick = { onChange(true) }, modifier = Modifier.weight(1f)) { Text("Yüzüstü (sırttan)") }
             else OutlinedButton(onClick = { onChange(true) }, modifier = Modifier.weight(1f)) { Text("Yüzüstü (sırttan)") }
+        }
+    }
+}
+
+/** Planlama BT'sinin çekildiği solunum fazı. */
+@Composable
+internal fun BreathPhaseSelector(phase: BreathPhase, onChange: (BreathPhase) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Planlama BT solunum fazı", fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(
+                BreathPhase.FREE to "Serbest",
+                BreathPhase.EXP_HOLD to "Ekspiryum sonu",
+                BreathPhase.INSP_HOLD to "İnspiryum sonu",
+            ).forEach { (p, label) ->
+                if (p == phase) Button(onClick = { onChange(p) }, modifier = Modifier.weight(1f)) { Text(label, fontSize = 12.sp) }
+                else OutlinedButton(onClick = { onChange(p) }, modifier = Modifier.weight(1f)) { Text(label, fontSize = 12.sp) }
+            }
         }
     }
 }

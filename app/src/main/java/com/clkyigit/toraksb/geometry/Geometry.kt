@@ -64,6 +64,8 @@ data class NeedlePlan(
     /** Cilt işareti: giriş noktasının orta hatta uzaklığı ve hastanın hangi tarafı. */
     val skinMarkCm: Double? = null,
     val skinMarkLeft: Boolean = false,
+    /** Planlama BT'sinin solunum fazı; yönlendirmede hatırlatma olarak gösterilir. */
+    val breathPhase: BreathPhase = BreathPhase.FREE,
     /** Plan girdileri ve görüntüden çıkan veriler (sütun adı → değer); çalışma kaydı ve özet için. */
     val details: Map<String, String> = emptyMap(),
 ) : java.io.Serializable

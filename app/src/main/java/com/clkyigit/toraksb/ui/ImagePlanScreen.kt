@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.platform.LocalDensity
 import com.clkyigit.toraksb.data.StudyLog
+import com.clkyigit.toraksb.geometry.BreathPhase
 import com.clkyigit.toraksb.geometry.Dab
 import com.clkyigit.toraksb.geometry.LesionAnalysis
 import com.clkyigit.toraksb.geometry.LesionMask
@@ -143,6 +144,7 @@ class ImagePlanState {
     var customCenter by mutableStateOf<Px?>(null)
     /** Yüzüstü hasta (sırttan giriş): yalnız sağ/sol yazıları değişir. */
     var prone by mutableStateOf(false)
+    var breathPhase by mutableStateOf(BreathPhase.FREE)
 
     var movingCenter by mutableStateOf(false)
 
@@ -247,11 +249,13 @@ class ImagePlanState {
                 p.copy(
                     toleranceDeg = a.toleranceDeg.coerceIn(0.5, 10.0),
                     prone = prone,
+                    breathPhase = breathPhase,
                     skinMarkCm = midlineCm.num(),
                     skinMarkLeft = midlineLeft,
                     details = linkedMapOf(
                         "kaynak" to "goruntu",
                         "hasta_pozisyonu" to if (prone) "yuzustu" else "sirtustu",
+                        "solunum_fazi" to breathPhase.csv,
                         "goruntu_genislik_px" to (m?.imageWidth?.toString() ?: ""),
                         "goruntu_yukseklik_px" to (m?.imageHeight?.toString() ?: ""),
                         "giris_x_px" to n(e.x, 1), "giris_y_px" to n(e.y, 1),
@@ -295,7 +299,7 @@ class ImagePlanState {
                     s.depthCm, s.depthAlongPath, s.midlineCm, s.midlineLeft,
                     s.ccCm, s.ccCaudal, s.manualAngle, s.angleOverride, s.angleTowardLeft,
                     s.customCenter?.x ?: Double.NaN, s.customCenter?.y ?: Double.NaN,
-                    s.prone,
+                    s.prone, s.breathPhase.name,
                 )
             },
             restore = { l ->
@@ -318,6 +322,7 @@ class ImagePlanState {
                         val cy = l.getOrNull(17) as? Double ?: Double.NaN
                         if (!cx.isNaN()) customCenter = Px(cx, cy)
                         prone = l.getOrNull(18) as? Boolean ?: false
+                        breathPhase = (l.getOrNull(19) as? String)?.let { n -> runCatching { BreathPhase.valueOf(n) }.getOrNull() } ?: BreathPhase.FREE
                     }
                 }.getOrElse { ImagePlanState() }
             },
@@ -542,6 +547,7 @@ private fun ValuesForm(s: ImagePlanState) {
     Card {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             PositionSelector(s.prone) { s.prone = it }
+            BreathPhaseSelector(s.breathPhase) { s.breathPhase = it }
             NumberField("Lezyon derinliği (cm)", s.depthCm) { s.depthCm = it }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ChoiceButton("İğne yolu boyunca", s.depthAlongPath, Modifier.weight(1f)) { s.depthAlongPath = true }
