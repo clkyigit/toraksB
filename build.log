@@ -1,0 +1,141 @@
+Downloading https://services.gradle.org/distributions/gradle-8.14.3-bin.zip
+.............10%.............20%.............30%.............40%.............50%.............60%.............70%.............80%.............90%..............100%
+
+Welcome to Gradle 8.14.3!
+
+Here are the highlights of this release:
+ - Java 24 support
+ - GraalVM Native Image toolchain selection
+ - Enhancements to test reporting
+ - Build Authoring improvements
+
+For more details see https://docs.gradle.org/8.14.3/release-notes.html
+
+Starting a Gradle Daemon (subsequent builds will be faster)
+
+> Configure project :shared
+w: The following Kotlin/Native targets cannot be built on this machine and are disabled:
+iosArm64, iosSimulatorArm64
+To hide this message, add 'kotlin.native.ignoreDisabledTargets=true' to the Gradle properties.
+
+
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :shared:preBuild UP-TO-DATE
+> Task :shared:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugResValues
+> Task :shared:writeDebugAarMetadata
+> Task :shared:generateDebugResValues
+> Task :app:checkDebugAarMetadata
+> Task :shared:generateDebugResources
+> Task :shared:packageDebugResources
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :shared:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :shared:processDebugManifest
+> Task :shared:compileDebugLibraryResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:processDebugManifestForPackage
+> Task :shared:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :shared:parseDebugLocalResources
+> Task :app:javaPreCompileDebug
+> Task :shared:javaPreCompileDebug
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileDebugUnitTest
+> Task :shared:generateDebugRFile
+> Task :app:buildKotlinToolingMetadata
+> Task :app:processDebugResources
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :shared:preReleaseBuild UP-TO-DATE
+> Task :app:generateReleaseResValues
+> Task :shared:writeReleaseAarMetadata
+> Task :shared:generateReleaseResValues
+> Task :app:checkReleaseAarMetadata
+> Task :shared:generateReleaseResources
+> Task :shared:packageReleaseResources
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:generateReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:parseReleaseLocalResources
+> Task :app:extractDeepLinksRelease
+> Task :shared:extractDeepLinksRelease
+> Task :shared:compileReleaseLibraryResources
+> Task :shared:processReleaseManifest
+> Task :shared:parseReleaseLocalResources
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:processReleaseManifestForPackage
+> Task :shared:generateReleaseRFile
+> Task :shared:javaPreCompileRelease
+> Task :app:mergeReleaseResources
+> Task :app:javaPreCompileRelease
+> Task :app:preReleaseUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileReleaseUnitTest
+> Task :shared:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:processReleaseResources
+> Task :shared:javaPreCompileDebugUnitTest
+> Task :shared:preReleaseUnitTestBuild UP-TO-DATE
+> Task :shared:generateDebugUnitTestStubRFile
+> Task :shared:javaPreCompileReleaseUnitTest
+> Task :shared:generateReleaseUnitTestStubRFile
+
+> Task :shared:compileDebugKotlinAndroid
+w: file:///home/runner/work/toraksB/toraksB/shared/src/androidMain/kotlin/com/clkyigit/toraksb/geometry/Platform.android.kt:3:1 'expect'/'actual' classes (including interfaces, objects, annotations, enums, and 'actual' typealiases) are in Beta. You can use -Xexpect-actual-classes flag to suppress this warning. Also see: https://youtrack.jetbrains.com/issue/KT-61573
+w: file:///home/runner/work/toraksB/toraksB/shared/src/commonMain/kotlin/com/clkyigit/toraksb/geometry/Platform.kt:6:1 'expect'/'actual' classes (including interfaces, objects, annotations, enums, and 'actual' typealiases) are in Beta. You can use -Xexpect-actual-classes flag to suppress this warning. Also see: https://youtrack.jetbrains.com/issue/KT-61573
+
+> Task :shared:compileReleaseKotlinAndroid
+w: file:///home/runner/work/toraksB/toraksB/shared/src/androidMain/kotlin/com/clkyigit/toraksb/geometry/Platform.android.kt:3:1 'expect'/'actual' classes (including interfaces, objects, annotations, enums, and 'actual' typealiases) are in Beta. You can use -Xexpect-actual-classes flag to suppress this warning. Also see: https://youtrack.jetbrains.com/issue/KT-61573
+w: file:///home/runner/work/toraksB/toraksB/shared/src/commonMain/kotlin/com/clkyigit/toraksb/geometry/Platform.kt:6:1 'expect'/'actual' classes (including interfaces, objects, annotations, enums, and 'actual' typealiases) are in Beta. You can use -Xexpect-actual-classes flag to suppress this warning. Also see: https://youtrack.jetbrains.com/issue/KT-61573
+
+> Task :shared:compileReleaseJavaWithJavac NO-SOURCE
+> Task :shared:compileDebugJavaWithJavac NO-SOURCE
+> Task :shared:bundleLibRuntimeToJarDebug
+> Task :shared:bundleLibCompileToJarDebug
+> Task :shared:processDebugJavaRes
+> Task :shared:bundleLibRuntimeToJarRelease
+> Task :shared:bundleLibCompileToJarRelease
+> Task :shared:processReleaseJavaRes
+> Task :shared:compileDebugUnitTestKotlinAndroid
+> Task :shared:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :shared:processDebugUnitTestJavaRes
+> Task :shared:compileReleaseUnitTestKotlinAndroid
+
+> Task :shared:testDebugUnitTest
+
+NumFormatTest > formatsFixed FAILED
+    org.junit.ComparisonFailure at CsvTest.kt:23
+
+27 tests completed, 1 failed
+
+> Task :shared:testDebugUnitTest FAILED
+> Task :app:compileReleaseKotlin
+> Task :app:compileDebugKotlin
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1792246878523.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/toraksB/toraksB/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':shared:testDebugUnitTest'.
+> There were failing tests. See the report at: file:///home/runner/work/toraksB/toraksB/shared/build/reports/tests/testDebugUnitTest/index.html
+
+* Try:
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 1m 37s
+69 actionable tasks: 69 executed
