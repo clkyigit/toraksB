@@ -19,7 +19,6 @@ object StudyLog {
         "vaka_kodu" to "Vaka kodu",
         "kaynak" to "Plan kaynağı",
         "hasta_pozisyonu" to "Hasta pozisyonu",
-        "goruntu_180_donduruldu" to "Görüntü 180° döndürüldü",
         "goruntu_genislik_px" to "Görüntü genişliği (px)",
         "goruntu_yukseklik_px" to "Görüntü yüksekliği (px)",
         "giris_x_px" to "Giriş x (px)",
