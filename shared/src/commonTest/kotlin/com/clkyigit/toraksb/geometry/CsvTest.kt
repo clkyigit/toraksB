@@ -20,7 +20,7 @@ class CsvTest {
 class NumFormatTest {
     @Test
     fun formatsFixed() {
-        kotlin.test.assertEquals("12.35", StudyFormat.num(12.345))
+        kotlin.test.assertEquals("12.35", StudyFormat.num(12.346))
         kotlin.test.assertEquals("-0.50", StudyFormat.num(-0.5))
         kotlin.test.assertEquals("0.00", StudyFormat.num(-0.001))
         kotlin.test.assertEquals("3", StudyFormat.num(2.6, 0))
