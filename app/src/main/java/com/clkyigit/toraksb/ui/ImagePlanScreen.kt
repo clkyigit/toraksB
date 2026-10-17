@@ -67,13 +67,9 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import com.clkyigit.toraksb.geometry.ImageGeometry
-import com.clkyigit.toraksb.geometry.ImageMarks
-import com.clkyigit.toraksb.geometry.ImageMeasurement
 import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.PlanCalculator
 import com.clkyigit.toraksb.geometry.Px
-import com.clkyigit.toraksb.geometry.Side
 import com.clkyigit.toraksb.geometry.TableCalibration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -81,43 +77,36 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
 
-/** Görüntüde işaretlenen noktalar, işaretleme sırasıyla. */
+/** Görüntüde işaretlenen iki nokta. */
 enum class Mark(val label: String, val color: Color) {
-    SCALE_A("Cetvel 1", Color(0xFFFFC400)),
-    SCALE_B("Cetvel 2", Color(0xFFFFC400)),
     ENTRY("Giriş", Color(0xFF00E5FF)),
-    TARGET("Kitle", Color(0xFFFF4081)),
-    MIDLINE("Orta hat", Color(0xFFB2FF59)),
+    TARGET("Lezyon", Color(0xFFFF4081)),
 }
 
-/** Sihirbaz adımları. */
 enum class Step(val title: String, val hint: String) {
-    PHOTO("BT görüntüsü", "Konsolda kitlenin ve giriş noktasının göründüğü aksiyel kesiti açın, ekrana tam karşıdan fotoğraflayın."),
-    SCALE_A("Cetvelin bir ucu", "Uzunluğunu bildiğiniz çizginin (konsol cetveli ya da konsolda çizdiğiniz ölçüm) bir ucuna dokunun."),
-    SCALE_B("Cetvelin diğer ucu", "Aynı çizginin diğer ucuna dokunun."),
-    SCALE_LEN("Cetvel uzunluğu", "Bu çizginin gerçek uzunluğunu santimetre olarak yazın."),
+    PHOTO("BT görüntüsü", "Konsolda lezyonun ve giriş noktasının göründüğü aksiyel kesiti açın, ekrana tam karşıdan fotoğraflayın."),
     ENTRY("Cilt giriş noktası", "İğnenin cilde gireceği noktaya dokunun."),
-    TARGET("Kitle", "İğne ucunun ulaşacağı noktaya dokunun."),
-    MIDLINE("Orta hat – giriş mesafesi", "Orta hatta (vertebra korpusu ortası) dokunun, mesafeyi elle yazın ya da atlayın."),
+    TARGET("Lezyon", "Lezyonun ortasına dokunun."),
+    VALUES("Ölçümler", "Konsolda ölçtüğünüz değerleri girin."),
     DONE("Plan hazır", ""),
 }
 
 class ImagePlanState {
     var imagePath by mutableStateOf<String?>(null)
     val marks = mutableStateMapOf<Mark, Px>()
-    /** Geri alma için yerleştirme sırası. */
     val history = mutableStateListOf<Mark>()
-    var scaleCm by mutableStateOf("")
-    var scaleConfirmed by mutableStateOf(false)
-    var midlineSkipped by mutableStateOf(false)
-    /** Orta hat – giriş mesafesi elle girildiyse (görüntüden ölçülenin yerine geçer). */
-    var midlineManual by mutableStateOf(false)
+
+    /** Lezyon derinliği (cm) ve ölçüm biçimi. */
+    var depthCm by mutableStateOf("")
+    var depthAlongPath by mutableStateOf(true)
+    /** Lezyon boyutu (cm) → tolerans açısı. */
+    var lesionCm by mutableStateOf("")
+    /** Orta hattan giriş noktasına (cm) ve taraf. */
     var midlineCm by mutableStateOf("")
     var midlineLeft by mutableStateOf(false)
+
     var ccCm by mutableStateOf("0")
     var ccCaudal by mutableStateOf(true)
-    var manualDepth by mutableStateOf(false)
-    var depthOverride by mutableStateOf("")
     var manualAngle by mutableStateOf(false)
     var angleOverride by mutableStateOf("")
     var angleTowardLeft by mutableStateOf(true)
@@ -125,86 +114,63 @@ class ImagePlanState {
     val step: Step
         get() = when {
             imagePath == null -> Step.PHOTO
-            Mark.SCALE_A !in marks -> Step.SCALE_A
-            Mark.SCALE_B !in marks -> Step.SCALE_B
-            !scaleConfirmed || scaleCm.num()?.takeIf { it > 0 } == null -> Step.SCALE_LEN
             Mark.ENTRY !in marks -> Step.ENTRY
             Mark.TARGET !in marks -> Step.TARGET
-            Mark.MIDLINE !in marks && !midlineSkipped && !midlineManual -> Step.MIDLINE
+            depthCm.num()?.takeIf { it > 0 } == null -> Step.VALUES
             else -> Step.DONE
         }
 
-    /** Şu an dokunuşla yerleştirilecek nokta (yoksa null). */
     val placing: Mark?
         get() = when (step) {
-            Step.SCALE_A -> Mark.SCALE_A
-            Step.SCALE_B -> Mark.SCALE_B
             Step.ENTRY -> Mark.ENTRY
             Step.TARGET -> Mark.TARGET
-            Step.MIDLINE -> Mark.MIDLINE
             else -> null
         }
 
+    /** Değerler girildikten sonra da noktalar yeniden yerleştirilebilir: seçili nokta. */
+    var editing by mutableStateOf<Mark?>(null)
+
     fun place(p: Px) {
-        val m = placing ?: return
+        val m = editing ?: placing ?: return
         marks[m] = p
-        history.remove(m)
-        history.add(m)
+        history.remove(m); history.add(m)
+        editing = null
     }
 
     fun undo() {
-        when {
-            midlineManual -> midlineManual = false
-            midlineSkipped -> midlineSkipped = false
-            history.isNotEmpty() -> {
-                val last = history.removeAt(history.lastIndex)
-                marks.remove(last)
-                if (last == Mark.SCALE_B) scaleConfirmed = false
-            }
-        }
-    }
-
-    fun restart() {
-        marks.clear(); history.clear()
-        scaleConfirmed = false; midlineSkipped = false; midlineManual = false
-    }
-
-    /** Cilt işareti: elle girilen değer varsa o, yoksa görüntüden ölçülen. */
-    fun skinMark(m: ImageMeasurement?): Triple<Double, Side, Boolean>? {
-        if (midlineManual) {
-            val cm = midlineCm.num() ?: return null
-            return Triple(cm, if (midlineLeft) Side.LEFT else Side.RIGHT, true)
-        }
-        val cm = m?.entryFromMidlineCm ?: return null
-        val side = m.entrySide ?: return null
-        return Triple(cm, side, false)
+        if (history.isNotEmpty()) marks.remove(history.removeAt(history.lastIndex))
+        editing = null
     }
 
     fun newImage(path: String) {
         imagePath = path
-        restart()
+        marks.clear(); history.clear(); editing = null
     }
 
-    fun measurement(): ImageMeasurement? {
+    fun plan(): NeedlePlan? {
         val e = marks[Mark.ENTRY] ?: return null
         val t = marks[Mark.TARGET] ?: return null
-        val a = marks[Mark.SCALE_A] ?: return null
-        val b = marks[Mark.SCALE_B] ?: return null
-        val cm = scaleCm.num()?.takeIf { it > 0 } ?: return null
-        return runCatching { ImageGeometry.measure(ImageMarks(e, t, a, b, cm, midline = marks[Mark.MIDLINE])) }.getOrNull()
-    }
-
-    fun plan(m: ImageMeasurement?): NeedlePlan? {
-        if (m == null || m.verticalDepthCm <= 0) return null
+        val depth = depthCm.num()?.takeIf { it > 0 } ?: return null
         val cc = (ccCm.num() ?: 0.0) * if (ccCaudal) 1 else -1
-        val depth = if (manualDepth) {
-            depthOverride.num()?.takeIf { it > 0 } ?: return null
-        } else null
         val angle = if (manualAngle) {
             (angleOverride.num() ?: return null) * if (angleTowardLeft) 1 else -1
         } else null
-        return runCatching { PlanCalculator.fromDeltas(m.dxCm, m.verticalDepthCm, cc, depth, angle) }.getOrNull()
+        return runCatching {
+            PlanCalculator.fromImageAngle(
+                dxPx = t.x - e.x, dyPx = t.y - e.y,
+                depthCm = depth, depthAlongPath = depthAlongPath,
+                lesionSizeCm = lesionCm.num()?.takeIf { it > 0 },
+                craniocaudalCm = cc, axialAngleOverrideDeg = angle,
+            )
+        }.getOrNull()
     }
+
+    val lesionAboveEntry: Boolean
+        get() {
+            val e = marks[Mark.ENTRY] ?: return false
+            val t = marks[Mark.TARGET] ?: return false
+            return t.y <= e.y
+        }
 
     companion object {
         val Saver = listSaver<ImagePlanState, Any>(
@@ -213,9 +179,9 @@ class ImagePlanState {
                     s.marks[m]?.let { listOf(it.x, it.y) } ?: listOf(Double.NaN, Double.NaN)
                 }
                 listOf(
-                    s.imagePath ?: "", s.history.joinToString(",") { it.name }, s.scaleCm, s.scaleConfirmed,
-                    s.midlineSkipped, s.ccCm, s.ccCaudal, s.manualDepth, s.depthOverride, s.manualAngle,
-                    s.angleOverride, s.angleTowardLeft, s.midlineManual, s.midlineCm, s.midlineLeft,
+                    s.imagePath ?: "", s.history.joinToString(",") { it.name },
+                    s.depthCm, s.depthAlongPath, s.lesionCm, s.midlineCm, s.midlineLeft,
+                    s.ccCm, s.ccCaudal, s.manualAngle, s.angleOverride, s.angleTowardLeft,
                 ) + flat
             },
             restore = { l ->
@@ -223,15 +189,13 @@ class ImagePlanState {
                     ImagePlanState().apply {
                         imagePath = (l[0] as String).ifEmpty { null }
                         (l[1] as String).split(',').filter { it.isNotEmpty() }.forEach { history.add(Mark.valueOf(it)) }
-                        scaleCm = l[2] as String; scaleConfirmed = l[3] as Boolean; midlineSkipped = l[4] as Boolean
-                        ccCm = l[5] as String; ccCaudal = l[6] as Boolean
-                        manualDepth = l[7] as Boolean; depthOverride = l[8] as String
-                        manualAngle = l[9] as Boolean; angleOverride = l[10] as String
-                        angleTowardLeft = l[11] as Boolean
-                        midlineManual = l[12] as Boolean; midlineCm = l[13] as String; midlineLeft = l[14] as Boolean
+                        depthCm = l[2] as String; depthAlongPath = l[3] as Boolean; lesionCm = l[4] as String
+                        midlineCm = l[5] as String; midlineLeft = l[6] as Boolean
+                        ccCm = l[7] as String; ccCaudal = l[8] as Boolean
+                        manualAngle = l[9] as Boolean; angleOverride = l[10] as String; angleTowardLeft = l[11] as Boolean
                         Mark.entries.forEachIndexed { i, m ->
-                            val x = l[15 + 2 * i] as Double
-                            val y = l[16 + 2 * i] as Double
+                            val x = l[12 + 2 * i] as Double
+                            val y = l[13 + 2 * i] as Double
                             if (!x.isNaN()) marks[m] = Px(x, y)
                         }
                     }
@@ -276,7 +240,7 @@ fun ImagePlanScreen(
     var pendingCamera by remember { mutableStateOf<File?>(null) }
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
     var loadError by remember { mutableStateOf(false) }
-    var showCorrections by remember { mutableStateOf(false) }
+    var showMore by remember { mutableStateOf(false) }
 
     val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
         val f = pendingCamera
@@ -305,8 +269,7 @@ fun ImagePlanScreen(
     }
 
     val step = if (image == null) Step.PHOTO else state.step
-    val measurement = state.measurement()
-    val plan = state.plan(measurement)
+    val plan = state.plan()
     val stepNo = Step.entries.indexOf(step) + 1
 
     Column(
@@ -315,17 +278,22 @@ fun ImagePlanScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("toraksB", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            TextButton(onClick = onManual) { Text("Elle giriş") }
+            TextButton(onClick = onManual) { Text("Görüntüsüz giriş") }
         }
 
-        // Tek talimat: şu an ne yapılacağı
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                val editing = state.editing
                 Text(
-                    if (step == Step.DONE) "Plan hazır" else "Adım $stepNo / ${Step.entries.size - 1} · ${step.title}",
+                    when {
+                        editing != null -> "${editing.label} noktasını yeniden yerleştirin"
+                        step == Step.DONE -> "Plan hazır"
+                        else -> "Adım $stepNo / ${Step.entries.size - 1} · ${step.title}"
+                    },
                     style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                 )
-                if (step.hint.isNotEmpty()) Text(step.hint)
+                if (editing != null) Text("Görüntüde yeni yerine dokunun.")
+                else if (step.hint.isNotEmpty()) Text(step.hint)
                 if (loadError) Text("Fotoğraf açılamadı. Tekrar deneyin.", color = MaterialTheme.colorScheme.error)
             }
         }
@@ -336,27 +304,32 @@ fun ImagePlanScreen(
             OutlinedButton(onClick = ::pickPhoto, modifier = Modifier.fillMaxWidth()) { Text("Galeriden seç") }
         } else {
             MarkCanvas(img, state)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = state::undo, enabled = state.history.isNotEmpty()) { Text("Geri al") }
+                if (Mark.ENTRY in state.marks && Mark.TARGET in state.marks) {
+                    OutlinedButton(onClick = { state.editing = Mark.ENTRY }) { Text("Girişi taşı") }
+                    OutlinedButton(onClick = { state.editing = Mark.TARGET }) { Text("Lezyonu taşı") }
+                }
+            }
+            TextButton(onClick = ::takePhoto) { Text("Yeni fotoğraf") }
 
-            when (step) {
-                Step.SCALE_LEN -> ScaleLengthInput(state)
-                Step.MIDLINE -> MidlineInput(state)
-                else -> Unit
+            if (state.lesionAboveEntry) {
+                Text(
+                    "Lezyon giriş noktasının üstünde işaretlenmiş. Noktaları kontrol edin.",
+                    color = MaterialTheme.colorScheme.error,
+                )
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(
-                    onClick = state::undo,
-                    enabled = state.history.isNotEmpty() || state.midlineSkipped || state.midlineManual,
-                ) { Text("Geri al") }
-                OutlinedButton(onClick = ::takePhoto) { Text("Yeni fotoğraf") }
+            if (step == Step.VALUES || step == Step.DONE) {
+                ValuesForm(state)
             }
 
             if (step == Step.DONE) {
-                ResultCard(measurement, plan, state.skinMark(measurement))
-                TextButton(onClick = { showCorrections = !showCorrections }) {
-                    Text(if (showCorrections) "Düzeltmeleri gizle" else "Derinliği / açıyı düzelt, kesit farkı ekle")
+                ResultCard(plan, state)
+                TextButton(onClick = { showMore = !showMore }) {
+                    Text(if (showMore) "Ek ayarları gizle" else "Ek ayarlar: açıyı elle gir, kesit farkı")
                 }
-                if (showCorrections) Corrections(state)
+                if (showMore) MoreSettings(state)
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(onClick = onCalibrate) { Text(if (calibrated) "Yeniden kalibre et" else "Masayı kalibre et") }
@@ -379,47 +352,49 @@ fun ImagePlanScreen(
 }
 
 @Composable
-private fun ScaleLengthInput(state: ImagePlanState) {
-    val valid = state.scaleCm.num()?.let { it > 0 } == true
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-            value = state.scaleCm,
-            onValueChange = { v -> state.scaleCm = v.filter { it.isDigit() || it == ',' || it == '.' } },
-            label = { Text("Uzunluk (cm)") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-            modifier = Modifier.weight(1f),
-        )
-        Button(onClick = { state.scaleConfirmed = true }, enabled = valid) { Text("Devam") }
+private fun ValuesForm(s: ImagePlanState) {
+    Card {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            NumberField("Lezyon derinliği (cm)", s.depthCm) { s.depthCm = it }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceButton("İğne yolu boyunca", s.depthAlongPath, Modifier.weight(1f)) { s.depthAlongPath = true }
+                ChoiceButton("Dikey", !s.depthAlongPath, Modifier.weight(1f)) { s.depthAlongPath = false }
+            }
+            NumberField(
+                "Lezyon boyutu (cm)", s.lesionCm,
+                hint = "Tolerans açısını belirler. Boş bırakılırsa ±1°.",
+            ) { s.lesionCm = it }
+            NumberField("Orta hattan giriş noktasına (cm)", s.midlineCm, hint = "Cilt işareti için, isteğe bağlı") { s.midlineCm = it }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceButton("Hastanın sağı", !s.midlineLeft, Modifier.weight(1f)) { s.midlineLeft = false }
+                ChoiceButton("Hastanın solu", s.midlineLeft, Modifier.weight(1f)) { s.midlineLeft = true }
+            }
+        }
     }
 }
 
 @Composable
-private fun ResultCard(m: ImageMeasurement?, plan: NeedlePlan?, skin: Triple<Double, Side, Boolean>?) {
+private fun ResultCard(plan: NeedlePlan?, s: ImagePlanState) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (m == null || plan == null) {
-                Text(
-                    if (m != null && m.verticalDepthCm <= 0)
-                        "Kitle giriş noktasının üstünde görünüyor. Noktaları kontrol edin (Geri al)."
-                    else "Plan hesaplanamadı. Noktaları kontrol edin.",
-                    color = MaterialTheme.colorScheme.error,
-                )
+            if (plan == null) {
+                Text("Plan hesaplanamadı. Noktaları ve derinliği kontrol edin.", color = MaterialTheme.colorScheme.error)
                 return@Column
             }
-            BigValue("Derinlik", "${plan.depthCm.f1()} cm", if (plan.depthIsManual) "elle girildi" else null)
+            BigValue("İğne yolu", "${plan.depthCm.f1()} cm", if (s.depthAlongPath) "elle girildi" else "dikey derinlikten")
             BigValue(
                 "Açı", "${abs(plan.axialAngleDeg).f1()}°",
-                "iğne ucu ${lateralWord(plan.axialAngleDeg).lowercase()}" + if (plan.axialAngleIsManual) " · elle girildi" else "",
+                "iğne ucu ${lateralWord(plan.axialAngleDeg).lowercase()}" + if (plan.axialAngleIsManual) " · elle" else " · görüntüden",
+            )
+            BigValue(
+                "Tolerans", "±${(plan.toleranceDeg ?: 1.0).f1()}°",
+                plan.lesionSizeCm?.let { "${it.f1()} cm lezyon, ${plan.depthCm.f1()} cm yol" } ?: "varsayılan",
             )
             if (abs(plan.craniocaudalAngleDeg) >= 0.05) {
                 BigValue("Kranyokaudal", "${abs(plan.craniocaudalAngleDeg).f1()}°", ccWord(plan.craniocaudalAngleDeg).lowercase())
             }
-            skin?.let { (cm, side, manual) ->
-                BigValue(
-                    "Cilt işareti", "${cm.f1()} cm",
-                    "orta hattın ${side.label.lowercase()} tarafında" + if (manual) " · elle girildi" else "",
-                )
+            s.midlineCm.num()?.let {
+                BigValue("Cilt işareti", "${it.f1()} cm", "orta hattın ${if (s.midlineLeft) "sol" else "sağ"} tarafında")
             }
         }
     }
@@ -437,23 +412,28 @@ private fun BigValue(label: String, value: String, note: String?) {
 }
 
 @Composable
-private fun Corrections(s: ImagePlanState) {
+private fun MoreSettings(s: ImagePlanState) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ToggleLine("Orta hat – giriş mesafesini elle gir", s.midlineManual) { s.midlineManual = it }
-        if (s.midlineManual) {
-            NumberField("Orta hattan giriş noktasına (cm)", s.midlineCm) { s.midlineCm = it }
-            ToggleLine("Giriş hastanın solunda (kapalı: sağında)", s.midlineLeft) { s.midlineLeft = it }
-        }
-        ToggleLine("Derinliği elle gir", s.manualDepth) { s.manualDepth = it }
-        if (s.manualDepth) NumberField("İğne yolu uzunluğu (cm)", s.depthOverride) { s.depthOverride = it }
         ToggleLine("Açıyı elle gir", s.manualAngle) { s.manualAngle = it }
         if (s.manualAngle) {
             NumberField("Açı (derece)", s.angleOverride) { s.angleOverride = it }
-            ToggleLine("İğne ucu hastanın soluna (kapalı: sağına)", s.angleTowardLeft) { s.angleTowardLeft = it }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChoiceButton("Ucu hastanın sağına", !s.angleTowardLeft, Modifier.weight(1f)) { s.angleTowardLeft = false }
+                ChoiceButton("Ucu hastanın soluna", s.angleTowardLeft, Modifier.weight(1f)) { s.angleTowardLeft = true }
+            }
         }
-        NumberField("Kitle ile giriş arası kesit farkı (cm)", s.ccCm) { s.ccCm = it }
-        ToggleLine("Kitle girişten kaudalde (kapalı: kranialde)", s.ccCaudal) { s.ccCaudal = it }
+        NumberField("Lezyon ile giriş arası kesit farkı (cm)", s.ccCm) { s.ccCm = it }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoiceButton("Lezyon kaudalde", s.ccCaudal, Modifier.weight(1f)) { s.ccCaudal = true }
+            ChoiceButton("Lezyon kranialde", !s.ccCaudal, Modifier.weight(1f)) { s.ccCaudal = false }
+        }
     }
+}
+
+@Composable
+private fun ChoiceButton(text: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    if (selected) Button(onClick = onClick, modifier = modifier) { Text(text) }
+    else OutlinedButton(onClick = onClick, modifier = modifier) { Text(text) }
 }
 
 @Composable
@@ -465,11 +445,14 @@ private fun ToggleLine(label: String, checked: Boolean, onChange: (Boolean) -> U
 }
 
 @Composable
-private fun NumberField(label: String, value: String, onChange: (String) -> Unit) {
+private fun NumberField(label: String, value: String, hint: String? = null, onChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
         onValueChange = { v -> onChange(v.filter { it.isDigit() || it == ',' || it == '.' }) },
         label = { Text(label) },
+        supportingText = if (hint != null) {
+            { Text(hint) }
+        } else null,
         isError = value.isNotEmpty() && value.num() == null,
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -512,28 +495,22 @@ private fun MarkCanvas(img: ImageBitmap, state: ImagePlanState) {
                 if (size.width < 1f || size.height < 1f) return@Canvas
                 val v = Viewport(size.width, size.height, img.width, img.height, zoom, pan)
                 val tl = v.toScreen(Px(0.0, 0.0))
-                val w = (img.width * v.scale).toInt().coerceAtLeast(1)
-                val h = (img.height * v.scale).toInt().coerceAtLeast(1)
                 drawImage(
                     img,
                     dstOffset = IntOffset(tl.x.toInt(), tl.y.toInt()),
-                    dstSize = IntSize(w, h),
+                    dstSize = IntSize((img.width * v.scale).toInt().coerceAtLeast(1), (img.height * v.scale).toInt().coerceAtLeast(1)),
                     filterQuality = if (v.scale > 2f) FilterQuality.None else FilterQuality.Medium,
                 )
                 drawOverlay(v, state, measurer)
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "İki parmakla yakınlaştırın, hassas dokunun.",
-                Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-            )
+            Text("İki parmakla yakınlaştırın, hassas dokunun.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
             if (zoom > 1.01f) TextButton(onClick = { zoom = 1f; pan = Offset.Zero }) { Text("Sığdır") }
         }
     }
 }
 
-/** Görüntü ↔ ekran dönüşümü. */
 private class Viewport(w: Float, h: Float, iw: Int, ih: Int, zoom: Float, pan: Offset) {
     val scale = minOf(w / iw, h / ih) * zoom
     private val cx = w / 2 + pan.x
@@ -545,68 +522,29 @@ private class Viewport(w: Float, h: Float, iw: Int, ih: Int, zoom: Float, pan: O
 }
 
 private fun DrawScope.drawOverlay(v: Viewport, s: ImagePlanState, tm: TextMeasurer) {
-    fun pt(k: Mark) = s.marks[k]?.let(v::toScreen)
     val dash = PathEffect.dashPathEffect(floatArrayOf(14f, 10f))
-
-    val sa = pt(Mark.SCALE_A); val sb = pt(Mark.SCALE_B)
-    if (sa != null && sb != null) drawLine(Mark.SCALE_A.color, sa, sb, 3f)
-    val e = pt(Mark.ENTRY); val t = pt(Mark.TARGET)
+    val e = s.marks[Mark.ENTRY]?.let(v::toScreen)
+    val t = s.marks[Mark.TARGET]?.let(v::toScreen)
     if (e != null) drawLine(Color.White.copy(alpha = 0.6f), e, Offset(e.x, size.height), 2f, pathEffect = dash)
     if (e != null && t != null) drawLine(Mark.TARGET.color, e, t, 4f)
-    pt(Mark.MIDLINE)?.let { m ->
-        drawLine(Mark.MIDLINE.color.copy(alpha = 0.8f), Offset(m.x, 0f), Offset(m.x, size.height), 2f, pathEffect = dash)
-    }
-
     Mark.entries.forEach { k ->
-        val p = pt(k) ?: return@forEach
+        val p = s.marks[k]?.let(v::toScreen) ?: return@forEach
+        val active = s.editing == k
         drawCircle(Color.Black.copy(alpha = 0.6f), 18f, p, style = Stroke(6f))
-        drawCircle(k.color, 18f, p, style = Stroke(3f))
+        drawCircle(if (active) Color.White else k.color, 18f, p, style = Stroke(3f))
         drawCircle(k.color, 2.5f, p)
         safeLabel(tm, k.label, p + Offset(22f, -30f), k.color)
     }
 }
 
-/**
- * Ekran dışına taşan etiketler çizilmez. (drawText'e kalan genişlik negatif verilirse
- * Compose istisna fırlatıp uygulamayı kapatır; önceki sürümdeki çökme buydu.)
- */
+/** Ekran dışına taşan etiketler çizilmez (drawText'e negatif alan verilirse uygulama çöker). */
 private fun DrawScope.safeLabel(tm: TextMeasurer, text: String, at: Offset, color: Color) {
     val layout = tm.measure(
         text,
         TextStyle(color = color, fontSize = 12.sp, fontWeight = FontWeight.Bold, background = Color.Black.copy(alpha = 0.55f)),
     )
+    if (at.x > size.width || at.y > size.height || at.x < -layout.size.width || at.y < -layout.size.height) return
     val x = at.x.coerceIn(0f, max(0f, size.width - layout.size.width))
     val y = at.y.coerceIn(0f, max(0f, size.height - layout.size.height))
-    if (at.x > size.width || at.y > size.height || at.x < -layout.size.width || at.y < -layout.size.height) return
     drawText(layout, topLeft = Offset(x, y))
-}
-
-@Composable
-private fun MidlineInput(s: ImagePlanState) {
-    var cm by remember { mutableStateOf(s.midlineCm) }
-    var left by remember { mutableStateOf(s.midlineLeft) }
-    val valid = cm.num() != null
-    Card {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("ya da mesafeyi elle girin", fontWeight = FontWeight.SemiBold)
-            NumberField("Orta hattan giriş noktasına (cm)", cm) { cm = it }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SideButton("Hastanın sağı", !left, Modifier.weight(1f)) { left = false }
-                SideButton("Hastanın solu", left, Modifier.weight(1f)) { left = true }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { s.midlineSkipped = true }, modifier = Modifier.weight(1f)) { Text("Atla") }
-                Button(
-                    onClick = { s.midlineCm = cm; s.midlineLeft = left; s.midlineManual = true },
-                    enabled = valid, modifier = Modifier.weight(1f),
-                ) { Text("Kaydet") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SideButton(text: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
-    if (selected) Button(onClick = onClick, modifier = modifier) { Text(text) }
-    else OutlinedButton(onClick = onClick, modifier = modifier) { Text(text) }
 }

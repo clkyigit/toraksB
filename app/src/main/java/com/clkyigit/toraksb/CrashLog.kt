@@ -30,5 +30,5 @@ object CrashLog {
 }
 
 object BuildInfo {
-    const val VERSION = "0.3.0"
+    const val VERSION = "0.4.0"
 }

@@ -54,9 +54,62 @@ data class NeedlePlan(
     val calculatedAxialAngleDeg: Double,
     val depthIsManual: Boolean,
     val axialAngleIsManual: Boolean,
+    /** Lezyon boyutundan hesaplanan izin verilen açı sapması (derece); bilinmiyorsa null. */
+    val toleranceDeg: Double? = null,
+    val lesionSizeCm: Double? = null,
 ) : java.io.Serializable
 
 object PlanCalculator {
+    /**
+     * İzin verilen açı sapması: iğne ucu, yol boyunca L cm ilerlediğinde lezyon yarıçapı r içinde
+     * kalmalı → L·tan(θ) ≤ r → θ = atan(r / L). 0,5°–10° aralığına sınırlanır.
+     */
+    fun toleranceFor(lesionSizeCm: Double?, pathCm: Double): Double? {
+        if (lesionSizeCm == null || lesionSizeCm <= 0 || pathCm <= 0) return null
+        return Math.toDegrees(atan2(lesionSizeCm / 2, pathCm)).coerceIn(0.5, 10.0)
+    }
+
+    /**
+     * BT görüntüsünden yalnız AÇI alınır (giriş→lezyon piksel farkı, ölçek gerekmez);
+     * uzunluk doktorun girdiği lezyon derinliğinden gelir.
+     *
+     * @param dxPx yatay piksel farkı (+ = ekranın sağı = hastanın solu)
+     * @param dyPx dikey piksel farkı (+ = aşağı, masaya doğru); 0'dan büyük olmalı
+     * @param depthCm doktorun girdiği lezyon derinliği
+     * @param depthAlongPath true: derinlik iğne yolu boyunca (ciltten lezyona); false: dikey
+     */
+    fun fromImageAngle(
+        dxPx: Double,
+        dyPx: Double,
+        depthCm: Double,
+        depthAlongPath: Boolean,
+        lesionSizeCm: Double? = null,
+        craniocaudalCm: Double = 0.0,
+        axialAngleOverrideDeg: Double? = null,
+    ): NeedlePlan {
+        require(dyPx > 0) { "Lezyon giriş noktasının altında olmalı" }
+        require(depthCm > 0) { "Derinlik 0'dan büyük olmalı" }
+        val tan = dxPx / dyPx
+        val dz = craniocaudalCm
+        val vertical = if (depthAlongPath) {
+            // yol² = (d·tan)² + d² + dz²
+            val inPlane2 = depthCm * depthCm - dz * dz
+            require(inPlane2 > 0) { "Kesit farkı derinlikten büyük olamaz" }
+            sqrt(inPlane2 / (1 + tan * tan))
+        } else depthCm
+        val base = fromDeltas(
+            dxCm = vertical * tan,
+            verticalDepthCm = vertical,
+            craniocaudalCm = dz,
+            depthOverrideCm = null,
+            axialAngleOverrideDeg = axialAngleOverrideDeg,
+        )
+        return base.copy(
+            toleranceDeg = toleranceFor(lesionSizeCm, base.depthCm),
+            lesionSizeCm = lesionSizeCm,
+        )
+    }
+
     fun compute(input: PlanInput): NeedlePlan {
         require(input.verticalDepthCm > 0) { "Dikey derinlik 0'dan büyük olmalı" }
         val xEntry = input.entrySide.sign * input.entryFromMidlineCm

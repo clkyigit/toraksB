@@ -63,7 +63,7 @@ fun GuideScreen(
     val g = rememberGravity()
     val gravity by g.gravity
     val o = OrientationMath.needleOrientation(gravity.x, gravity.y, gravity.z, calibration)
-    var tolerance by rememberSaveable { mutableFloatStateOf(1f) }
+    var tolerance by rememberSaveable(plan) { mutableFloatStateOf((plan.toleranceDeg ?: 1.0).toFloat().coerceIn(0.5f, 10f)) }
 
     val axialDiff = plan.axialAngleDeg - o.axialDeg
     val ccDiff = plan.craniocaudalAngleDeg - o.craniocaudalDeg
@@ -147,8 +147,12 @@ fun GuideScreen(
             style = MaterialTheme.typography.bodySmall,
             color = if (g.source == SensorSource.ACCELEROMETER) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
         )
-        Text("Tolerans: ±${tolerance.toDouble().f1()}°", style = MaterialTheme.typography.bodyMedium)
-        Slider(value = tolerance, onValueChange = { tolerance = it }, valueRange = 0.5f..5f, steps = 8)
+        Text(
+            "Tolerans: ±${tolerance.toDouble().f1()}°" +
+                (plan.lesionSizeCm?.let { " (${it.f1()} cm lezyona göre)" } ?: ""),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Slider(value = tolerance, onValueChange = { tolerance = it }, valueRange = 0.5f..10f, steps = 18)
 
         Text(
             "Telefonun uzun kenarını iğneye hizalayın; alt kenar iğne ucu tarafında, ekran ayak ucuna bakmalı " +

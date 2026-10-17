@@ -56,6 +56,7 @@ class PlanFormState {
     var manualAngle by mutableStateOf(false)
     var angleOverride by mutableStateOf("")
     var angleTowardLeft by mutableStateOf(true)
+    var lesionCm by mutableStateOf("")
 
     fun toInput(): PlanInput? {
         val entry = entryCm.num() ?: return null
@@ -76,7 +77,7 @@ class PlanFormState {
             save = {
                 listOf(it.entryCm, it.entrySide.name, it.targetCm, it.targetSide.name,
                     it.verticalDepthCm, it.ccCm, it.ccCaudal, it.manualDepth, it.depthOverride,
-                    it.manualAngle, it.angleOverride, it.angleTowardLeft)
+                    it.manualAngle, it.angleOverride, it.angleTowardLeft, it.lesionCm)
             },
             restore = { l ->
                 PlanFormState().apply {
@@ -86,6 +87,7 @@ class PlanFormState {
                     manualDepth = l[7] as Boolean; depthOverride = l[8] as String
                     manualAngle = l[9] as Boolean; angleOverride = l[10] as String
                     angleTowardLeft = l[11] as Boolean
+                    lesionCm = l.getOrNull(12) as? String ?: ""
                 }
             },
         )
@@ -109,7 +111,10 @@ fun PlanScreen(
     modifier: Modifier = Modifier,
 ) {
     val input = form.toInput()
-    val plan = input?.let { runCatching { PlanCalculator.compute(it) }.getOrNull() }
+    val plan = input?.let { runCatching { PlanCalculator.compute(it) }.getOrNull() }?.let { p ->
+        val lesion = form.lesionCm.num()?.takeIf { it > 0 }
+        p.copy(toleranceDeg = PlanCalculator.toleranceFor(lesion, p.depthCm), lesionSizeCm = lesion)
+    }
 
     Column(
         modifier
@@ -133,6 +138,10 @@ fun PlanScreen(
             "Dikey derinlik (cm)", form.verticalDepthCm,
             hint = "Giriş noktası seviyesinden hedefe, masaya dik mesafe",
         ) { form.verticalDepthCm = it }
+        CmField(
+            "Lezyon boyutu (cm)", form.lesionCm,
+            hint = "Tolerans açısını belirler; boş bırakılırsa ±1°",
+        ) { form.lesionCm = it }
 
         SectionTitle("Kranyokaudal fark (isteğe bağlı)")
         CmField(
