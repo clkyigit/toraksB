@@ -166,6 +166,8 @@ fun GuideScreen(
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
             )
         }
+        PlanDataCard(plan)
+        StudySaveCard(plan, o, allOk, calibration, calibrated, g.source)
         DisclaimerCard()
         OutlinedButton(onClick = onBack) { Text("Plana dön") }
     }

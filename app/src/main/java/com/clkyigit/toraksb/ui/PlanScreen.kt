@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.clkyigit.toraksb.data.StudyLog
 import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.PlanCalculator
 import com.clkyigit.toraksb.geometry.PlanInput
@@ -113,7 +114,28 @@ fun PlanScreen(
     val input = form.toInput()
     val plan = input?.let { runCatching { PlanCalculator.compute(it) }.getOrNull() }?.let { p ->
         val lesion = form.lesionCm.num()?.takeIf { it > 0 }
-        p.copy(toleranceDeg = PlanCalculator.toleranceFor(lesion, p.depthCm), lesionSizeCm = lesion)
+        fun n(v: Double?) = StudyLog.num(v)
+        p.copy(
+            toleranceDeg = PlanCalculator.toleranceFor(lesion, p.depthCm),
+            lesionSizeCm = lesion,
+            details = linkedMapOf(
+                "kaynak" to "elle",
+                "giris_orta_hat_cm" to n(form.entryCm.num()),
+                "giris_taraf" to if (form.entrySide == Side.LEFT) "sol" else "sag",
+                "hedef_orta_hat_cm" to n(form.targetCm.num()),
+                "hedef_taraf" to if (form.targetSide == Side.LEFT) "sol" else "sag",
+                "lezyon_boyutu_cm" to n(lesion),
+                "derinlik_girilen_cm" to n(form.verticalDepthCm.num()),
+                "derinlik_turu" to "dikey",
+                "igne_yolu_cm" to n(p.depthCm),
+                "igne_yolu_hesaplanan_cm" to n(p.calculatedDepthCm),
+                "kk_fark_cm" to n(input?.craniocaudalCm),
+                "aksiyel_aci_planlanan" to n(p.axialAngleDeg),
+                "aksiyel_aci_elle" to if (p.axialAngleIsManual) "evet" else "hayir",
+                "kk_aci_planlanan" to n(p.craniocaudalAngleDeg),
+                "tolerans_derece" to n(PlanCalculator.toleranceFor(lesion, p.depthCm) ?: 1.0),
+            ),
+        )
     }
 
     Column(
@@ -164,6 +186,7 @@ fun PlanScreen(
         }
 
         ResultCard(plan)
+        plan?.let { PlanDataCard(it) }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedButton(onClick = onCalibrate) { Text(if (calibrated) "Yeniden kalibre et" else "Masayı kalibre et") }

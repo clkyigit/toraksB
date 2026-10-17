@@ -57,6 +57,8 @@ data class NeedlePlan(
     /** Lezyon boyutundan hesaplanan izin verilen açı sapması (derece); bilinmiyorsa null. */
     val toleranceDeg: Double? = null,
     val lesionSizeCm: Double? = null,
+    /** Plan girdileri ve görüntüden çıkan veriler (sütun adı → değer); çalışma kaydı ve özet için. */
+    val details: Map<String, String> = emptyMap(),
 ) : java.io.Serializable
 
 object PlanCalculator {

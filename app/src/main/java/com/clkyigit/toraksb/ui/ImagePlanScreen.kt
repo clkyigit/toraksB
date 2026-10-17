@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.platform.LocalDensity
+import com.clkyigit.toraksb.data.StudyLog
 import com.clkyigit.toraksb.geometry.Dab
 import com.clkyigit.toraksb.geometry.LesionAnalysis
 import com.clkyigit.toraksb.geometry.LesionMask
@@ -237,7 +238,37 @@ class ImagePlanState {
                 dxPx = a.aim.x - e.x, dyPx = a.aim.y - e.y,
                 depthCm = depth, depthAlongPath = depthAlongPath,
                 craniocaudalCm = cc, axialAngleOverrideDeg = angle,
-            ).copy(toleranceDeg = a.toleranceDeg.coerceIn(0.5, 10.0))
+            ).let { p ->
+                val m = mask
+                fun n(v: Double?, d: Int = 2) = StudyLog.num(v, d)
+                p.copy(
+                    toleranceDeg = a.toleranceDeg.coerceIn(0.5, 10.0),
+                    details = linkedMapOf(
+                        "kaynak" to "goruntu",
+                        "goruntu_genislik_px" to (m?.imageWidth?.toString() ?: ""),
+                        "goruntu_yukseklik_px" to (m?.imageHeight?.toString() ?: ""),
+                        "giris_x_px" to n(e.x, 1), "giris_y_px" to n(e.y, 1),
+                        "hedef_x_px" to n(a.aim.x, 1), "hedef_y_px" to n(a.aim.y, 1),
+                        "agirlik_merkezi_x_px" to n(a.centroid.x, 1), "agirlik_merkezi_y_px" to n(a.centroid.y, 1),
+                        "hedef_elle_secildi" to if (a.aimIsCustom) "evet" else "hayir",
+                        "boyanan_alan_px2" to (m?.let { n(it.filledCount * it.cell * it.cell, 0) } ?: ""),
+                        "giris_orta_hat_cm" to n(midlineCm.num()),
+                        "giris_taraf" to if (midlineCm.num() == null) "" else if (midlineLeft) "sol" else "sag",
+                        "derinlik_girilen_cm" to n(depth),
+                        "derinlik_turu" to if (depthAlongPath) "igne_yolu" else "dikey",
+                        "igne_yolu_cm" to n(p.depthCm),
+                        "igne_yolu_hesaplanan_cm" to n(p.calculatedDepthCm),
+                        "kk_fark_cm" to n(cc),
+                        "aksiyel_aci_planlanan" to n(p.axialAngleDeg),
+                        "aksiyel_aci_goruntuden" to n(p.calculatedAxialAngleDeg),
+                        "aksiyel_aci_elle" to if (p.axialAngleIsManual) "evet" else "hayir",
+                        "kk_aci_planlanan" to n(p.craniocaudalAngleDeg),
+                        "pay_sag_derece" to n(a.marginRightDeg),
+                        "pay_sol_derece" to n(a.marginLeftDeg),
+                        "tolerans_derece" to n(a.toleranceDeg.coerceIn(0.5, 10.0)),
+                    ),
+                )
+            }
         }.getOrNull()
     }
 
@@ -315,6 +346,7 @@ fun ImagePlanScreen(
     onManual: () -> Unit,
     onStart: (NeedlePlan) -> Unit,
     modifier: Modifier = Modifier,
+    onStudy: () -> Unit = {},
 ) {
     val context = LocalContext.current
     var pendingCamera by remember { mutableStateOf<File?>(null) }
@@ -360,6 +392,7 @@ fun ImagePlanScreen(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("toraksB", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            TextButton(onClick = onStudy) { Text("Veriler") }
             TextButton(onClick = onManual) { Text("Görüntüsüz giriş") }
         }
 
@@ -406,6 +439,7 @@ fun ImagePlanScreen(
 
             if (step == Step.DONE) {
                 ResultCard(plan, analysis, state)
+                plan?.let { PlanDataCard(it) }
                 TextButton(onClick = { showMore = !showMore }) {
                     Text(if (showMore) "Ek ayarları gizle" else "Ek ayarlar: açıyı elle gir, kesit farkı")
                 }

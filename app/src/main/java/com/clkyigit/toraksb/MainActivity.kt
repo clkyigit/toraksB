@@ -39,6 +39,7 @@ import com.clkyigit.toraksb.ui.ImagePlanScreen
 import com.clkyigit.toraksb.ui.ImagePlanState
 import com.clkyigit.toraksb.ui.PlanFormState
 import com.clkyigit.toraksb.ui.PlanScreen
+import com.clkyigit.toraksb.ui.StudyScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -53,7 +54,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { IMAGE, MANUAL, CALIBRATION, GUIDE }
+private enum class Screen { IMAGE, MANUAL, CALIBRATION, GUIDE, STUDY }
 
 @Composable
 private fun ToraksApp() {
@@ -88,8 +89,10 @@ private fun ToraksApp() {
                     onManual = { planScreen = Screen.MANUAL; screen = Screen.MANUAL },
                     onStart = toGuide,
                     modifier = m,
+                    onStudy = { screen = Screen.STUDY },
                 )
             }
+            Screen.STUDY -> StudyScreen(onBack = { screen = planScreen }, modifier = m)
             Screen.MANUAL -> {
                 PlanScreen(
                     form = form,
