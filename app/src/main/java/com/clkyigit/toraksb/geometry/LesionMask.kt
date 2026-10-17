@@ -10,8 +10,11 @@ import kotlin.math.min
 data class Dab(val x: Double, val y: Double, val r: Double, val erase: Boolean)
 
 data class LesionAnalysis(
-    /** Boyanan alanın ağırlık merkezi: hedef nokta. */
+    /** Boyanan alanın ağırlık merkezi. */
     val centroid: Px,
+    /** Nişan alınan nokta: doktor merkezi taşıdıysa o, yoksa ağırlık merkezi. */
+    val aim: Px,
+    val aimIsCustom: Boolean,
     /** Girişten merkeze doğrultu (derece; + = ekranın sağı = hastanın solu). */
     val centerAngleDeg: Double,
     /** Merkez doğrultudan lezyonun sağ/sol kenarına kalan açı. */
@@ -65,15 +68,17 @@ class LesionMask(val imageWidth: Int, val imageHeight: Int, gridLong: Int = 512)
 
     fun isFilled(col: Int, row: Int) = bits[row * cols + col]
 
-    fun analyze(entry: Px): LesionAnalysis? {
+    /** @param target doktorun seçtiği hedef; null ise ağırlık merkezi kullanılır. */
+    fun analyze(entry: Px, target: Px? = null): LesionAnalysis? {
         var n = 0; var sx = 0.0; var sy = 0.0
         for (row in 0 until rows) for (col in 0 until cols) if (bits[row * cols + col]) {
             n++; sx += (col + 0.5) * cell; sy += (row + 0.5) * cell
         }
         if (n == 0) return null
         val centroid = Px(sx / n, sy / n)
-        if (centroid.y <= entry.y) return null
-        val center = atan2(centroid.x - entry.x, centroid.y - entry.y)
+        val aim = target ?: centroid
+        if (aim.y <= entry.y) return null
+        val center = atan2(aim.x - entry.x, aim.y - entry.y)
 
         var minA = Double.MAX_VALUE; var maxA = -Double.MAX_VALUE
         var above = false
@@ -92,6 +97,8 @@ class LesionMask(val imageWidth: Int, val imageHeight: Int, gridLong: Int = 512)
         if (minA == Double.MAX_VALUE) return null
         return LesionAnalysis(
             centroid = centroid,
+            aim = aim,
+            aimIsCustom = target != null,
             centerAngleDeg = Math.toDegrees(center),
             marginRightDeg = Math.toDegrees(max(0.0, maxA)),
             marginLeftDeg = Math.toDegrees(max(0.0, -minA)),

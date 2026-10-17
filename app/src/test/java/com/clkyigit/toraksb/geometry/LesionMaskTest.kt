@@ -49,3 +49,28 @@ class LesionMaskTest {
         assertEquals(45.0, a.centerAngleDeg, 0.2)
     }
 }
+
+class LesionMaskCustomAimTest {
+    /** Hedef lezyonun sağ kenarına yakın seçilirse sağ pay daralır, sol pay genişler. */
+    @Test
+    fun customAimShiftsMargins() {
+        val m = LesionMask(1000, 1000, gridLong = 1000)
+        m.stamp(Dab(500.0, 500.0, 40.0, erase = false))
+        val entry = Px(500.0, 100.0)
+        val centered = m.analyze(entry)!!
+        val shifted = m.analyze(entry, Px(530.0, 500.0))!!
+        org.junit.Assert.assertTrue(shifted.aimIsCustom)
+        org.junit.Assert.assertTrue(shifted.marginRightDeg < centered.marginRightDeg)
+        org.junit.Assert.assertTrue(shifted.marginLeftDeg > centered.marginLeftDeg)
+        org.junit.Assert.assertEquals(shifted.marginRightDeg, shifted.toleranceDeg, 1e-9)
+    }
+
+    /** Hedef lezyonun dışına konursa tolerans 0. */
+    @Test
+    fun aimOutsideLesionGivesZero() {
+        val m = LesionMask(1000, 1000, gridLong = 1000)
+        m.stamp(Dab(500.0, 500.0, 40.0, erase = false))
+        val a = m.analyze(Px(500.0, 100.0), Px(700.0, 500.0))!!
+        org.junit.Assert.assertEquals(0.0, a.toleranceDeg, 1e-9)
+    }
+}

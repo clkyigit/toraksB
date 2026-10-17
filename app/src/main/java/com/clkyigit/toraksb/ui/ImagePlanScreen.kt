@@ -138,6 +138,9 @@ class ImagePlanState {
 
     /** Giriş noktasını yeniden yerleştirme modu. */
     var movingEntry by mutableStateOf(false)
+    /** Hedef (nişan) noktası: null ise boyanan alanın ağırlık merkezi. */
+    var customCenter by mutableStateOf<Px?>(null)
+    var movingCenter by mutableStateOf(false)
 
     fun ensureMask(w: Int, h: Int) {
         val m = mask
@@ -149,15 +152,15 @@ class ImagePlanState {
 
     fun maskOrNull(): LesionMask? = mask
 
-    private var cacheKey: Pair<Int, Px?>? = null
+    private var cacheKey: Triple<Int, Px?, Px?>? = null
     private var cacheVal: LesionAnalysis? = null
 
     fun analysis(): LesionAnalysis? {
         val v = maskVersion // okunarak değişiklikte yeniden hesaplanması sağlanır
         val e = marks[Mark.ENTRY] ?: return null
-        val key = v to e
+        val key = Triple(v, e, customCenter)
         if (key != cacheKey) {
-            cacheVal = mask?.analyze(e)
+            cacheVal = mask?.analyze(e, customCenter)
             cacheKey = key
         }
         return cacheVal
@@ -172,9 +175,14 @@ class ImagePlanState {
             else -> Step.DONE
         }
 
-    val painting: Boolean get() = !movingEntry && step == Step.PAINT && imagePath != null
+    val painting: Boolean get() = !movingEntry && !movingCenter && step == Step.PAINT && imagePath != null
 
     fun tap(p: Px) {
+        if (movingCenter) {
+            customCenter = p
+            movingCenter = false
+            return
+        }
         if (movingEntry || step == Step.ENTRY) {
             marks[Mark.ENTRY] = p
             movingEntry = false
@@ -200,7 +208,7 @@ class ImagePlanState {
     fun undoStroke() = cancelStroke()
 
     fun clearPaint() {
-        dabs.clear(); strokeStarts.clear(); rebuild()
+        dabs.clear(); strokeStarts.clear(); customCenter = null; rebuild()
     }
 
     private fun rebuild() {
@@ -212,6 +220,7 @@ class ImagePlanState {
         imagePath = path
         marks.clear(); dabs.clear(); strokeStarts.clear()
         paintDone = false; movingEntry = false; erasing = false
+        customCenter = null; movingCenter = false
         mask = null; maskVersion++
     }
 
@@ -225,7 +234,7 @@ class ImagePlanState {
         } else null
         return runCatching {
             PlanCalculator.fromImageAngle(
-                dxPx = a.centroid.x - e.x, dyPx = a.centroid.y - e.y,
+                dxPx = a.aim.x - e.x, dyPx = a.aim.y - e.y,
                 depthCm = depth, depthAlongPath = depthAlongPath,
                 craniocaudalCm = cc, axialAngleOverrideDeg = angle,
             ).copy(toleranceDeg = a.toleranceDeg.coerceIn(0.5, 10.0))
@@ -247,6 +256,7 @@ class ImagePlanState {
                     flat, s.strokeStarts.toIntArray(), s.paintDone, s.brushDp,
                     s.depthCm, s.depthAlongPath, s.midlineCm, s.midlineLeft,
                     s.ccCm, s.ccCaudal, s.manualAngle, s.angleOverride, s.angleTowardLeft,
+                    s.customCenter?.x ?: Double.NaN, s.customCenter?.y ?: Double.NaN,
                 )
             },
             restore = { l ->
@@ -265,6 +275,9 @@ class ImagePlanState {
                         midlineCm = l[9] as String; midlineLeft = l[10] as Boolean
                         ccCm = l[11] as String; ccCaudal = l[12] as Boolean
                         manualAngle = l[13] as Boolean; angleOverride = l[14] as String; angleTowardLeft = l[15] as Boolean
+                        val cx = l.getOrNull(16) as? Double ?: Double.NaN
+                        val cy = l.getOrNull(17) as? Double ?: Double.NaN
+                        if (!cx.isNaN()) customCenter = Px(cx, cy)
                     }
                 }.getOrElse { ImagePlanState() }
             },
@@ -342,7 +355,7 @@ fun ImagePlanScreen(
     val stepNo = Step.entries.indexOf(step) + 1
 
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState(), enabled = !state.painting).padding(16.dp),
+        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -354,13 +367,15 @@ fun ImagePlanScreen(
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     when {
+                        state.movingCenter -> "Hedef noktasını seçin"
                         state.movingEntry -> "Giriş noktasını yeniden yerleştirin"
                         step == Step.DONE -> "Plan hazır"
                         else -> "Adım $stepNo / ${Step.entries.size - 1} · ${step.title}"
                     },
                     style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                 )
-                if (state.movingEntry) Text("Görüntüde yeni yerine dokunun.")
+                if (state.movingCenter) Text("Lezyonda iğne ucunun ulaşacağı noktaya dokunun.")
+                else if (state.movingEntry) Text("Görüntüde yeni yerine dokunun.")
                 else if (step.hint.isNotEmpty()) Text(step.hint)
                 if (loadError) Text("Fotoğraf açılamadı. Tekrar deneyin.", color = MaterialTheme.colorScheme.error)
             }
@@ -371,13 +386,17 @@ fun ImagePlanScreen(
             Button(onClick = ::takePhoto, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Ekranı fotoğrafla") }
             OutlinedButton(onClick = ::pickPhoto, modifier = Modifier.fillMaxWidth()) { Text("Galeriden seç") }
         } else {
+            if (state.painting) PaintTopBar(state, analysis)
+
             MarkCanvas(img, state, analysis)
 
-            if (state.painting) {
-                PaintTools(state, analysis)
-            } else if (Mark.ENTRY in state.marks) {
+            if (state.painting) PaintBottom(state, analysis)
+            if (analysis != null && !state.movingEntry) CenterTools(state, analysis)
+            if (!state.painting && Mark.ENTRY in state.marks && !state.movingCenter) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { state.movingEntry = true }) { Text("Girişi taşı") }
+                    OutlinedButton(onClick = { state.movingEntry = !state.movingEntry }) {
+                        Text(if (state.movingEntry) "Vazgeç" else "Girişi taşı")
+                    }
                     if (state.paintDone) OutlinedButton(onClick = { state.paintDone = false }) { Text("Lezyonu düzenle") }
                 }
             }
@@ -412,38 +431,66 @@ fun ImagePlanScreen(
     }
 }
 
+/** Görüntünün ÜSTÜNDE: her zaman görünür kalan boyama düğmeleri. */
 @Composable
-private fun PaintTools(s: ImagePlanState, a: LesionAnalysis?) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun PaintTopBar(s: ImagePlanState, a: LesionAnalysis?) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ChoiceButton("Boya", !s.erasing, Modifier.weight(1f)) { s.erasing = false }
             ChoiceButton("Sil", s.erasing, Modifier.weight(1f)) { s.erasing = true }
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Fırça", Modifier.padding(end = 8.dp))
-            Slider(
-                value = s.brushDp, onValueChange = { s.brushDp = it },
-                valueRange = 4f..40f, modifier = Modifier.weight(1f),
-            )
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = s::undoStroke, enabled = s.strokeStarts.isNotEmpty()) { Text("Geri al") }
-            OutlinedButton(onClick = s::clearPaint, enabled = s.dabs.isNotEmpty()) { Text("Temizle") }
-        }
-        if (a != null) {
-            Text(
-                "Tolerans şu an ±${a.toleranceDeg.f1()}° (sağa ${a.marginRightDeg.f1()}°, sola ${a.marginLeftDeg.f1()}°)",
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            if (a.partlyAboveEntry) {
-                Text("Boyamanın bir kısmı giriş noktasının üstünde; hesapta yok sayıldı.", color = MaterialTheme.colorScheme.error)
+            OutlinedButton(onClick = s::undoStroke, enabled = s.strokeStarts.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                Text("Geri al")
             }
         }
         Button(
             onClick = { s.paintDone = true },
             enabled = a != null,
             modifier = Modifier.fillMaxWidth().height(52.dp),
-        ) { Text("Boyama bitti") }
+        ) { Text(if (a != null) "Boyama bitti · tolerans ±${a.toleranceDeg.f1()}°" else "Boyama bitti") }
+        if (s.dabs.isNotEmpty() && a == null) {
+            Text(
+                "Boyanan alan giriş noktasının altında olmalı. Girişi ya da boyamayı kontrol edin.",
+                color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+            )
+        }
+    }
+}
+
+/** Görüntünün altında: fırça boyutu, temizle, ayrıntılı tolerans. */
+@Composable
+private fun PaintBottom(s: ImagePlanState, a: LesionAnalysis?) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Fırça", Modifier.padding(end = 8.dp))
+            Slider(value = s.brushDp, onValueChange = { s.brushDp = it }, valueRange = 4f..40f, modifier = Modifier.weight(1f))
+            TextButton(onClick = s::clearPaint, enabled = s.dabs.isNotEmpty()) { Text("Temizle") }
+        }
+        if (a != null) {
+            Text("Sağa ${a.marginRightDeg.f1()}°, sola ${a.marginLeftDeg.f1()}° pay", style = MaterialTheme.typography.bodySmall)
+            if (a.partlyAboveEntry) {
+                Text("Boyamanın bir kısmı giriş noktasının üstünde; hesapta yok sayıldı.", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+/** Hedef noktasını değiştirme: varsayılan boyanan alanın ağırlık merkezi. */
+@Composable
+private fun CenterTools(s: ImagePlanState, a: LesionAnalysis) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = { s.movingCenter = !s.movingCenter }) {
+            Text(if (s.movingCenter) "Vazgeç" else "Merkezi taşı")
+        }
+        if (a.aimIsCustom && !s.movingCenter) {
+            TextButton(onClick = { s.customCenter = null }) { Text("Ortaya al") }
+        }
+        Text(
+            if (a.aimIsCustom) "Hedef elle seçildi" else "Hedef: lezyonun ortası",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+    if (a.toleranceDeg <= 0.0) {
+        Text("Hedef lezyonun dışında. Merkezi lezyonun içine taşıyın.", color = MaterialTheme.colorScheme.error)
     }
 }
 
@@ -477,7 +524,7 @@ private fun ResultCard(plan: NeedlePlan?, a: LesionAnalysis?, s: ImagePlanState)
             BigValue(
                 "Açı", "${abs(plan.axialAngleDeg).f1()}°",
                 "iğne ucu ${lateralWord(plan.axialAngleDeg).lowercase()}" +
-                    if (plan.axialAngleIsManual) " · elle" else " · lezyon merkezine",
+                    if (plan.axialAngleIsManual) " · elle" else if (a.aimIsCustom) " · seçilen hedefe" else " · lezyon merkezine",
             )
             BigValue(
                 "Tolerans", "±${(plan.toleranceDeg ?: 1.0).f1()}°",
@@ -694,7 +741,8 @@ private fun DrawScope.drawOverlay(v: Viewport, s: ImagePlanState, a: LesionAnaly
     drawLine(Color.White.copy(alpha = 0.6f), e, Offset(e.x, size.height), 2f, pathEffect = dash)
     if (a != null) {
         // Hedef doğrultu ve tolerans konisi (iki kenar), lezyonun ötesine kadar uzatılmış
-        val c = v.toScreen(a.centroid)
+        val c = v.toScreen(a.aim)
+        if (a.aimIsCustom) drawCircle(Color.White.copy(alpha = 0.5f), 4f, v.toScreen(a.centroid))
         val len = (c - e).getDistance() * 1.25f
         fun ray(offsetDeg: Double): Offset {
             val ang = Math.toRadians(a.centerAngleDeg + offsetDeg)
@@ -703,9 +751,12 @@ private fun DrawScope.drawOverlay(v: Viewport, s: ImagePlanState, a: LesionAnaly
         drawLine(Color.Yellow.copy(alpha = 0.8f), e, ray(a.marginRightDeg), 2f, pathEffect = dash)
         drawLine(Color.Yellow.copy(alpha = 0.8f), e, ray(-a.marginLeftDeg), 2f, pathEffect = dash)
         drawLine(LesionColor, e, c, 4f)
-        drawCircle(Color.Black.copy(alpha = 0.6f), 9f, c, style = Stroke(4f))
-        drawCircle(Color.White, 9f, c, style = Stroke(2f))
-        safeLabel(tm, "Merkez", c + Offset(14f, 8f), Color.White)
+        val ring = if (s.movingCenter) 14f else 10f
+        drawCircle(Color.Black.copy(alpha = 0.6f), ring, c, style = Stroke(4f))
+        drawCircle(Color.White, ring, c, style = Stroke(2f))
+        drawLine(Color.White, c - Offset(ring + 6f, 0f), c + Offset(ring + 6f, 0f), 1.5f)
+        drawLine(Color.White, c - Offset(0f, ring + 6f), c + Offset(0f, ring + 6f), 1.5f)
+        safeLabel(tm, "Hedef", c + Offset(16f, 8f), Color.White)
     }
     val active = s.movingEntry
     drawCircle(Color.Black.copy(alpha = 0.6f), 18f, e, style = Stroke(6f))
