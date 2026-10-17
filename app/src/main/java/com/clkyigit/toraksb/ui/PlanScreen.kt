@@ -118,7 +118,8 @@ fun PlanScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("toraksB — İğne planı", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("Elle giriş (yedek)", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("BT konsolunda ölçtüğünüz değerleri girin. Görüntüden planlamaya dönmek için geri tuşunu kullanın.", style = MaterialTheme.typography.bodySmall)
         DisclaimerCard()
 
         SectionTitle("Cilt giriş noktası")

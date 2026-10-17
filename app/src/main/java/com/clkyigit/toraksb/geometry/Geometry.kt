@@ -61,22 +61,40 @@ object PlanCalculator {
         require(input.verticalDepthCm > 0) { "Dikey derinlik 0'dan büyük olmalı" }
         val xEntry = input.entrySide.sign * input.entryFromMidlineCm
         val xTarget = input.targetSide.sign * input.targetFromMidlineCm
-        val dx = xTarget - xEntry
-        val d = input.verticalDepthCm
-        val dz = input.craniocaudalCm
+        return fromDeltas(
+            dxCm = xTarget - xEntry,
+            verticalDepthCm = input.verticalDepthCm,
+            craniocaudalCm = input.craniocaudalCm,
+            depthOverrideCm = input.depthOverrideCm,
+            axialAngleOverrideDeg = input.axialAngleOverrideDeg,
+        )
+    }
+
+    /** dx: + = hedef girişin hastanın SOLUNDA; d: dikey derinlik; dz: + = hedef kaudalde. */
+    fun fromDeltas(
+        dxCm: Double,
+        verticalDepthCm: Double,
+        craniocaudalCm: Double = 0.0,
+        depthOverrideCm: Double? = null,
+        axialAngleOverrideDeg: Double? = null,
+    ): NeedlePlan {
+        require(verticalDepthCm > 0) { "Dikey derinlik 0'dan büyük olmalı" }
+        val dx = dxCm
+        val d = verticalDepthCm
+        val dz = craniocaudalCm
 
         val axial = Math.toDegrees(atan2(dx, d))
         val cc = Math.toDegrees(atan2(dz, hypot(dx, d)))
         val length = sqrt(dx * dx + d * d + dz * dz)
 
         return NeedlePlan(
-            axialAngleDeg = input.axialAngleOverrideDeg ?: axial,
+            axialAngleDeg = axialAngleOverrideDeg ?: axial,
             craniocaudalAngleDeg = cc,
-            depthCm = input.depthOverrideCm ?: length,
+            depthCm = depthOverrideCm ?: length,
             calculatedDepthCm = length,
             calculatedAxialAngleDeg = axial,
-            depthIsManual = input.depthOverrideCm != null,
-            axialAngleIsManual = input.axialAngleOverrideDeg != null,
+            depthIsManual = depthOverrideCm != null,
+            axialAngleIsManual = axialAngleOverrideDeg != null,
         )
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -20,6 +21,8 @@ import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.TableCalibration
 import com.clkyigit.toraksb.ui.CalibrationScreen
 import com.clkyigit.toraksb.ui.GuideScreen
+import com.clkyigit.toraksb.ui.ImagePlanScreen
+import com.clkyigit.toraksb.ui.ImagePlanState
 import com.clkyigit.toraksb.ui.PlanFormState
 import com.clkyigit.toraksb.ui.PlanScreen
 
@@ -35,36 +38,58 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { PLAN, CALIBRATION, GUIDE }
+private enum class Screen { IMAGE, MANUAL, CALIBRATION, GUIDE }
 
 @Composable
 private fun ToraksApp() {
-    var screen by rememberSaveable { mutableStateOf(Screen.PLAN) }
+    var screen by rememberSaveable { mutableStateOf(Screen.IMAGE) }
+    // Kalibrasyon ve yönlendirmeden dönülecek planlama ekranı
+    var planScreen by rememberSaveable { mutableStateOf(Screen.IMAGE) }
     val form = rememberSaveable(saver = PlanFormState.Saver) { PlanFormState() }
+    val imageState = rememberSaveable(saver = ImagePlanState.Saver) { ImagePlanState() }
     var calibration by rememberSaveable { mutableStateOf(TableCalibration.NONE) }
     var calibrated by rememberSaveable { mutableStateOf(false) }
     var plan by rememberSaveable { mutableStateOf<NeedlePlan?>(null) }
 
-    BackHandler(enabled = screen != Screen.PLAN) { screen = Screen.PLAN }
+    val toCalibration = { screen = Screen.CALIBRATION }
+    val toGuide = { p: NeedlePlan -> plan = p; screen = Screen.GUIDE }
+
+    BackHandler(enabled = screen != Screen.IMAGE) {
+        if (screen == Screen.MANUAL) planScreen = Screen.IMAGE
+        screen = planScreen
+    }
 
     Scaffold { padding ->
         val m = Modifier.padding(padding)
         when (screen) {
-            Screen.PLAN -> PlanScreen(
-                form = form,
-                calibrated = calibrated,
-                calibration = calibration,
-                onCalibrate = { screen = Screen.CALIBRATION },
-                onStart = { p -> plan = p; screen = Screen.GUIDE },
-                modifier = m,
-            )
+            Screen.IMAGE -> {
+                ImagePlanScreen(
+                    state = imageState,
+                    calibrated = calibrated,
+                    calibration = calibration,
+                    onCalibrate = toCalibration,
+                    onManual = { planScreen = Screen.MANUAL; screen = Screen.MANUAL },
+                    onStart = toGuide,
+                    modifier = m,
+                )
+            }
+            Screen.MANUAL -> {
+                PlanScreen(
+                    form = form,
+                    calibrated = calibrated,
+                    calibration = calibration,
+                    onCalibrate = toCalibration,
+                    onStart = toGuide,
+                    modifier = m,
+                )
+            }
             Screen.CALIBRATION -> CalibrationScreen(
                 onDone = { c ->
                     calibration = c
                     calibrated = true
-                    screen = Screen.PLAN
+                    screen = planScreen
                 },
-                onCancel = { screen = Screen.PLAN },
+                onCancel = { screen = planScreen },
                 modifier = m,
             )
             Screen.GUIDE -> {
@@ -74,14 +99,11 @@ private fun ToraksApp() {
                         plan = p,
                         calibration = calibration,
                         calibrated = calibrated,
-                        onBack = { screen = Screen.PLAN },
+                        onBack = { screen = planScreen },
                         modifier = m,
                     )
                 } else {
-                    PlanScreen(form, calibrated, calibration,
-                        onCalibrate = { screen = Screen.CALIBRATION },
-                        onStart = { np -> plan = np; screen = Screen.GUIDE },
-                        modifier = m)
+                    LaunchedEffect(Unit) { screen = planScreen }
                 }
             }
         }
