@@ -1,0 +1,3 @@
+e: file:///Users/runner/work/toraksB/toraksB/shared/src/iosMain/kotlin/com/clkyigit/toraksb/platform/Platform.ios.kt:170:20 Unresolved reference 'popoverPresentationController'.
+> Task :shared:compileKotlinIosSimulatorArm64 FAILED
+BUILD FAILED in 2m 41s
