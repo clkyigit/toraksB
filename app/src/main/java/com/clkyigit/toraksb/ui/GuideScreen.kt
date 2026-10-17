@@ -4,6 +4,7 @@ import android.os.Build
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -26,8 +28,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
-import com.clkyigit.toraksb.geometry.RespStats
-import com.clkyigit.toraksb.geometry.RespiratoryTracker
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -56,7 +56,6 @@ import kotlin.math.sin
 private val OkGreen = Color(0xFF1B8A3A)
 private val WarnAmber = Color(0xFFC77700)
 private val OffRed = Color(0xFFC62828)
-private val BandBlue = Color(0xFF1E88E5)
 
 @Composable
 fun GuideScreen(
@@ -69,38 +68,11 @@ fun GuideScreen(
     val g = rememberGravity()
     val gravity by g.gravity
     val o = OrientationMath.needleOrientation(gravity.x, gravity.y, gravity.z, calibration)
+    // Telefon steril değil: iğneye dokunmaz, hedef açıya getirilir ve iğne telefona paralel ilerletilir.
     var tolerance by rememberSaveable(plan) { mutableFloatStateOf((plan.toleranceDeg ?: 1.0).toFloat().coerceIn(0.5f, 10f)) }
 
-    // Solunum salınımı: son ~8 sn'lik açılardan bant ve plato (nefes duraklaması)
-    val axTracker = remember { RespiratoryTracker() }
-    val ccTracker = remember { RespiratoryTracker() }
-    var axResp by remember { mutableStateOf<RespStats?>(null) }
-    var ccResp by remember { mutableStateOf<RespStats?>(null) }
-    val currentCalibration by rememberUpdatedState(calibration)
-    LaunchedEffect(Unit) {
-        var lastStats = 0L
-        snapshotFlow { g.gravity.value }.collect { gv ->
-            val now = System.nanoTime()
-            val t = now / 1e9
-            val oo = OrientationMath.needleOrientation(gv.x, gv.y, gv.z, currentCalibration)
-            if (oo.reliable) {
-                axTracker.add(t, oo.axialDeg)
-                ccTracker.add(t, oo.craniocaudalDeg)
-            }
-            if (now - lastStats > 200_000_000L) {
-                lastStats = now
-                axResp = axTracker.stats()
-                ccResp = ccTracker.stats()
-            }
-        }
-    }
-    val breathing = axResp?.breathing == true || ccResp?.breathing == true
-    // Solunum varsa hedefe uygunluk plato (duraklama) açısında değerlendirilir
-    val evalAxial = axResp?.takeIf { it.breathing }?.plateau ?: o.axialDeg
-    val evalCc = ccResp?.takeIf { it.breathing }?.plateau ?: o.craniocaudalDeg
-
-    val axialDiff = plan.axialAngleDeg - evalAxial
-    val ccDiff = plan.craniocaudalAngleDeg - evalCc
+    val axialDiff = plan.axialAngleDeg - o.axialDeg
+    val ccDiff = plan.craniocaudalAngleDeg - o.craniocaudalDeg
     // Histerezis: hedefe girince yeşil yanar, ancak toleransın 1,5 katı aşılınca söner (titreme olmaz)
     val axialOk = rememberWithin(abs(axialDiff), tolerance)
     val ccOk = rememberWithin(abs(ccDiff), tolerance)
@@ -127,7 +99,10 @@ fun GuideScreen(
     }
 
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier.fillMaxSize()
+            // Hedefteyken ekran kenarları kalın yeşil çerçeve: telefonun kenarına paralelliği gözle kurmayı kolaylaştırır
+            .border(if (allOk) 10.dp else 4.dp, statusColor)
+            .verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -138,9 +113,7 @@ fun GuideScreen(
             Text(
                 when {
                     !o.reliable -> "Telefonu dik tutun"
-                    allOk && breathing -> "PLATODA HEDEFTE"
-                    allOk -> "HEDEF AÇIDA"
-                    breathing -> "Platoyu hedefe getirin"
+                    allOk -> "HEDEF AÇIDA · iğneyi telefona paralel ilerletin"
                     else -> "Açıyı ayarlayın"
                 },
                 color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold,
@@ -173,10 +146,8 @@ fun GuideScreen(
             targetDeg = plan.axialAngleDeg,
             currentDeg = o.axialDeg,
             needleColor = if (axialOk) OkGreen else statusColor,
-            band = axResp?.takeIf { it.breathing },
             modifier = Modifier.fillMaxWidth().height(220.dp),
         )
-        RespirationCard(axResp, ccResp, plan)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(screenLeftSide(plan.prone), style = MaterialTheme.typography.labelMedium)
             Text(screenRightSide(plan.prone), style = MaterialTheme.typography.labelMedium)
@@ -184,16 +155,14 @@ fun GuideScreen(
 
         AngleRow(
             title = "Aksiyel",
-            target = plan.axialAngleDeg, current = evalAxial, ok = axialOk,
-            currentLabel = if (axResp?.breathing == true) "Plato" else "Şu an",
+            target = plan.axialAngleDeg, current = o.axialDeg, ok = axialOk,
             instruction = if (axialDiff > 0) "Ucu ${lateralWord(1.0, plan.prone)} (ekranın sağına) yatırın"
             else "Ucu ${lateralWord(-1.0, plan.prone)} (ekranın soluna) yatırın",
             word = { lateralWord(it, plan.prone) },
         )
         AngleRow(
             title = "Kranyokaudal",
-            target = plan.craniocaudalAngleDeg, current = evalCc, ok = ccOk,
-            currentLabel = if (ccResp?.breathing == true) "Plato" else "Şu an",
+            target = plan.craniocaudalAngleDeg, current = o.craniocaudalDeg, ok = ccOk,
             instruction = if (ccDiff > 0) "Ucu KAUDALE (kendinize doğru) eğin"
             else "Ucu KRANİALE (gantriye doğru) eğin",
             word = ::ccWord,
@@ -213,8 +182,9 @@ fun GuideScreen(
         Slider(value = tolerance, onValueChange = { tolerance = it }, valueRange = 0.5f..10f, steps = 18)
 
         Text(
-            "Telefonun uzun kenarını iğneye hizalayın; alt kenar iğne ucu tarafında, ekran ayak ucuna bakmalı " +
-                "(ekran düzlemi gantri lazeriyle aynı aksiyel düzlemde). Ekrandaki görünüm BT aksiyel görüntüsüyle aynı yöndedir.",
+            "Telefon steril alanın dışında tutulur, iğneye dokunmaz. Telefonu iğnenin yanında, ekranı ayak ucuna bakacak " +
+                    "şekilde (gantri lazeriyle aynı aksiyel düzlemde) tutup hedef açıya getirin. Çerçeve yeşil olunca iğneyi " +
+                    "telefonun uzun kenarına paralel ilerletin. Ekrandaki görünüm BT aksiyel görüntüsüyle aynı yöndedir.",
             style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center,
         )
         if (!calibrated) {
@@ -224,7 +194,7 @@ fun GuideScreen(
             )
         }
         PlanDataCard(plan)
-        StudySaveCard(plan, o, allOk, calibration, calibrated, g.source, axResp, ccResp)
+        StudySaveCard(plan, o, allOk, calibration, calibrated, g.source)
         DisclaimerCard()
         OutlinedButton(onClick = onBack) { Text("Plana dön") }
     }
@@ -258,8 +228,7 @@ private fun shortWord(deg: Double, word: (Double) -> String) =
  */
 @Composable
 private fun AxialGauge(
-    targetDeg: Double, currentDeg: Double, needleColor: Color,
-    band: RespStats?, modifier: Modifier,
+    targetDeg: Double, currentDeg: Double, needleColor: Color, modifier: Modifier,
 ) {
     val outline = MaterialTheme.colorScheme.outline
     Canvas(modifier) {
@@ -276,17 +245,6 @@ private fun AxialGauge(
         }
         drawLine(outline, center, polar(center, r, 0.0), 2f,
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f)))
-        // Solunum salınım bandı (açık mavi kama) ve plato çizgisi
-        if (band != null) {
-            val lo = band.min.coerceIn(-89.0, 89.0); val hi = band.max.coerceIn(-89.0, 89.0)
-            drawArc(
-                color = BandBlue.copy(alpha = 0.28f),
-                startAngle = (90.0 - hi).toFloat(), sweepAngle = (hi - lo).toFloat().coerceAtLeast(0.5f),
-                useCenter = true,
-                topLeft = Offset(center.x - r, center.y - r), size = androidx.compose.ui.geometry.Size(2 * r, 2 * r),
-            )
-            drawLine(BandBlue, polar(center, r * 0.55f, band.plateau), polar(center, r, band.plateau), 5f)
-        }
         drawLine(OkGreen, center, polar(center, r, targetDeg), 6f,
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 10f)))
         needle(center, r, currentDeg.coerceIn(-89.0, 89.0), needleColor)
@@ -318,44 +276,5 @@ private fun GuideValue(label: String, value: String, note: String?, modifier: Mo
         Text(label, style = MaterialTheme.typography.labelLarge)
         Text(value, fontSize = 32.sp, fontWeight = FontWeight.Bold)
         note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-    }
-}
-
-/** Solunum salınımı özeti ve plato kullanımı. */
-@Composable
-private fun RespirationCard(ax: RespStats?, cc: RespStats?, plan: NeedlePlan) {
-    val breathing = ax?.breathing == true || cc?.breathing == true
-    Column(
-        Modifier.fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        if (!breathing) {
-            Text(
-                if (ax == null) "Solunum: ölçülüyor…" else "Solunum salınımı algılanmadı; anlık açı kullanılıyor.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            return@Column
-        }
-        Text("Solunum salınımı algılandı", fontWeight = FontWeight.SemiBold, color = BandBlue)
-        ax?.takeIf { it.breathing }?.let {
-            Text(
-                "Aksiyel: ±${it.amplitude.f1()}° salınım · plato ${abs(it.plateau).f1()}° " +
-                    "(hedef ${abs(plan.axialAngleDeg).f1()}°)",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        cc?.takeIf { it.breathing }?.let {
-            Text(
-                "Kranyokaudal: ±${it.amplitude.f1()}° salınım · plato ${abs(it.plateau).f1()}°",
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        Text(
-            "Uygunluk plato (nefes duraklaması) açısına göre değerlendiriliyor. İğneyi plato evresinde ilerletin. " +
-                "Mavi kama salınım aralığı, mavi çizgi platodur.",
-            style = MaterialTheme.typography.bodySmall,
-        )
     }
 }
