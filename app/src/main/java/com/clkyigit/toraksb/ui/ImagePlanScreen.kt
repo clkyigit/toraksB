@@ -584,7 +584,7 @@ private fun MarkCanvas(img: ImageBitmap, state: ImagePlanState, analysis: Lesion
                 fun dabAt(o: Offset) {
                     val v = viewport(w, h)
                     val p = v.toImage(o)
-                    val r = with(density) { state.brushDp.dp.toPx() } / v.scale
+                    val r = (with(density) { state.brushDp.dp.toPx() } / v.scale).toDouble()
                     val prev = last
                     if (prev == null) {
                         state.addDab(Dab(p.x, p.y, r, state.erasing))
