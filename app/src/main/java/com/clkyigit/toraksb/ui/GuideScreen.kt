@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -75,7 +76,11 @@ fun GuideScreen(
     val ccDiff = plan.craniocaudalAngleDeg - o.craniocaudalDeg
     // Histerezis: hedefe girince yeşil yanar, ancak toleransın 1,5 katı aşılınca söner (titreme olmaz)
     val axialOk = rememberWithin(abs(axialDiff), tolerance)
-    val ccOk = rememberWithin(abs(ccDiff), tolerance)
+    // Planda kranyokaudal açı yoksa (aksiyel giriş) kranyokaudal yön gantri lazeriyle kontrol edilir;
+    // yeşil ışık yalnız aksiyel açıya bakar. Telefonu ekranı görmek için geriye yatırmak böylece hata sayılmaz.
+    var checkCc by rememberSaveable(plan) { mutableStateOf(abs(plan.craniocaudalAngleDeg) >= 1.0) }
+    val ccWithin = rememberWithin(abs(ccDiff), tolerance)
+    val ccOk = !checkCc || ccWithin
     val allOk = o.reliable && axialOk && ccOk
 
     val view = LocalView.current
@@ -94,7 +99,7 @@ fun GuideScreen(
     val statusColor = when {
         !o.reliable -> OffRed
         allOk -> OkGreen
-        abs(axialDiff) <= 3 * tolerance && abs(ccDiff) <= 3 * tolerance -> WarnAmber
+        abs(axialDiff) <= 3 * tolerance && (!checkCc || abs(ccDiff) <= 3 * tolerance) -> WarnAmber
         else -> OffRed
     }
 
@@ -160,13 +165,26 @@ fun GuideScreen(
             else "Ucu ${lateralWord(-1.0, plan.prone)} (ekranın soluna) yatırın",
             word = { lateralWord(it, plan.prone) },
         )
-        AngleRow(
-            title = "Kranyokaudal",
-            target = plan.craniocaudalAngleDeg, current = o.craniocaudalDeg, ok = ccOk,
-            instruction = if (ccDiff > 0) "Ucu KAUDALE (kendinize doğru) eğin"
-            else "Ucu KRANİALE (gantriye doğru) eğin",
-            word = ::ccWord,
-        )
+        if (checkCc) {
+            AngleRow(
+                title = "Kranyokaudal",
+                target = plan.craniocaudalAngleDeg, current = o.craniocaudalDeg, ok = ccWithin,
+                instruction = if (ccDiff > 0) "Ucu KAUDALE (kendinize doğru) eğin"
+                else "Ucu KRANİALE (gantriye doğru) eğin",
+                word = ::ccWord,
+            )
+        } else {
+            Text(
+                "Kranyokaudal: gantri lazeriyle kontrol edin (telefon ${abs(o.craniocaudalDeg).f1()}° " +
+                    "${ccWord(o.craniocaudalDeg).lowercase()} eğik; hedef değerlendirmesine katılmıyor)",
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Kranyokaudal açıyı da kontrol et", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            Switch(checked = checkCc, onCheckedChange = { checkCc = it })
+        }
 
         Text(
             "Sensör: ${g.source?.label ?: "bulunamadı"}",
