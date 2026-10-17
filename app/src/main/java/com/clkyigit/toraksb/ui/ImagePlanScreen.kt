@@ -141,6 +141,26 @@ class ImagePlanState {
     var movingEntry by mutableStateOf(false)
     /** Hedef (nişan) noktası: null ise boyanan alanın ağırlık merkezi. */
     var customCenter by mutableStateOf<Px?>(null)
+    /** Yüzüstü hasta (sırttan giriş): yalnız sağ/sol yazıları değişir. */
+    var prone by mutableStateOf(false)
+    /** Konsol görüntüyü ters gösteriyorsa (masa üstte) fotoğraf 180° döndürülür. */
+    var rotate180 by mutableStateOf(false)
+
+    /** 180° döndürme: işaretlenen her şey de görüntüyle birlikte döner. */
+    fun toggleRotation() {
+        val m = mask
+        if (m != null) {
+            val w = m.imageWidth.toDouble(); val h = m.imageHeight.toDouble()
+            fun f(p: Px) = Px(w - p.x, h - p.y)
+            marks[Mark.ENTRY]?.let { marks[Mark.ENTRY] = f(it) }
+            customCenter = customCenter?.let(::f)
+            val turned = dabs.map { it.copy(x = w - it.x, y = h - it.y) }
+            dabs.clear(); dabs.addAll(turned)
+            m.stampAll(dabs)
+            maskVersion++
+        }
+        rotate180 = !rotate180
+    }
     var movingCenter by mutableStateOf(false)
 
     fun ensureMask(w: Int, h: Int) {
@@ -231,7 +251,7 @@ class ImagePlanState {
         val depth = depthCm.num()?.takeIf { it > 0 } ?: return null
         val cc = (ccCm.num() ?: 0.0) * if (ccCaudal) 1 else -1
         val angle = if (manualAngle) {
-            (angleOverride.num() ?: return null) * if (angleTowardLeft) 1 else -1
+            (angleOverride.num() ?: return null) * (if (angleTowardLeft) 1 else -1) * (if (prone) -1 else 1)
         } else null
         return runCatching {
             PlanCalculator.fromImageAngle(
@@ -243,8 +263,13 @@ class ImagePlanState {
                 fun n(v: Double?, d: Int = 2) = StudyLog.num(v, d)
                 p.copy(
                     toleranceDeg = a.toleranceDeg.coerceIn(0.5, 10.0),
+                    prone = prone,
+                    skinMarkCm = midlineCm.num(),
+                    skinMarkLeft = midlineLeft,
                     details = linkedMapOf(
                         "kaynak" to "goruntu",
+                        "hasta_pozisyonu" to if (prone) "yuzustu" else "sirtustu",
+                        "goruntu_180_donduruldu" to if (rotate180) "evet" else "hayir",
                         "goruntu_genislik_px" to (m?.imageWidth?.toString() ?: ""),
                         "goruntu_yukseklik_px" to (m?.imageHeight?.toString() ?: ""),
                         "giris_x_px" to n(e.x, 1), "giris_y_px" to n(e.y, 1),
@@ -288,6 +313,7 @@ class ImagePlanState {
                     s.depthCm, s.depthAlongPath, s.midlineCm, s.midlineLeft,
                     s.ccCm, s.ccCaudal, s.manualAngle, s.angleOverride, s.angleTowardLeft,
                     s.customCenter?.x ?: Double.NaN, s.customCenter?.y ?: Double.NaN,
+                    s.prone, s.rotate180,
                 )
             },
             restore = { l ->
@@ -309,6 +335,8 @@ class ImagePlanState {
                         val cx = l.getOrNull(16) as? Double ?: Double.NaN
                         val cy = l.getOrNull(17) as? Double ?: Double.NaN
                         if (!cx.isNaN()) customCenter = Px(cx, cy)
+                        prone = l.getOrNull(18) as? Boolean ?: false
+                        rotate180 = l.getOrNull(19) as? Boolean ?: false
                     }
                 }.getOrElse { ImagePlanState() }
             },
@@ -326,15 +354,20 @@ private fun copyToCache(context: Context, uri: Uri): String? = runCatching {
 }.getOrNull()
 
 /** EXIF yönünü uygular; en uzun kenarı 2048 px'e küçültür. */
-private fun decode(path: String): ImageBitmap? = runCatching {
-    ImageDecoder.decodeBitmap(ImageDecoder.createSource(File(path))) { decoder, info, _ ->
+private fun decode(path: String, rotate180: Boolean): ImageBitmap? = runCatching {
+    val bmp = ImageDecoder.decodeBitmap(ImageDecoder.createSource(File(path))) { decoder, info, _ ->
         val longest = max(info.size.width, info.size.height)
         if (longest > 2048) {
             val k = 2048.0 / longest
             decoder.setTargetSize((info.size.width * k).toInt().coerceAtLeast(1), (info.size.height * k).toInt().coerceAtLeast(1))
         }
         decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-    }.asImageBitmap()
+    }
+    val out = if (rotate180) {
+        val m = android.graphics.Matrix().apply { postRotate(180f) }
+        android.graphics.Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, m, true)
+    } else bmp
+    out.asImageBitmap()
 }.getOrNull()
 
 @Composable
@@ -374,9 +407,10 @@ fun ImagePlanScreen(
             .onFailure { loadError = true }
     }
 
-    LaunchedEffect(state.imagePath) {
+    LaunchedEffect(state.imagePath, state.rotate180) {
         val p = state.imagePath
-        image = if (p == null) null else withContext(Dispatchers.IO) { decode(p) }
+        val rot = state.rotate180
+        image = if (p == null) null else withContext(Dispatchers.IO) { decode(p, rot) }
         loadError = p != null && image == null
         image?.let { state.ensureMask(it.width, it.height) }
     }
@@ -433,7 +467,10 @@ fun ImagePlanScreen(
                     if (state.paintDone) OutlinedButton(onClick = { state.paintDone = false }) { Text("Lezyonu düzenle") }
                 }
             }
-            TextButton(onClick = ::takePhoto) { Text("Yeni fotoğraf") }
+            Row {
+                TextButton(onClick = ::takePhoto) { Text("Yeni fotoğraf") }
+                TextButton(onClick = state::toggleRotation) { Text("180° döndür") }
+            }
 
             if (step == Step.VALUES || step == Step.DONE) ValuesForm(state)
 
@@ -483,7 +520,7 @@ private fun PaintTopBar(s: ImagePlanState, a: LesionAnalysis?) {
         ) { Text(if (a != null) "Boyama bitti · tolerans ±${a.toleranceDeg.f1()}°" else "Boyama bitti") }
         if (s.dabs.isNotEmpty() && a == null) {
             Text(
-                "Boyanan alan giriş noktasının altında olmalı. Girişi ya da boyamayı kontrol edin.",
+                "Boyanan alan giriş noktasının altında olmalı. Konsol görüntüyü ters gösteriyorsa (masa üstte) \"180° döndür\"e basın.",
                 color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -500,7 +537,7 @@ private fun PaintBottom(s: ImagePlanState, a: LesionAnalysis?) {
             TextButton(onClick = s::clearPaint, enabled = s.dabs.isNotEmpty()) { Text("Temizle") }
         }
         if (a != null) {
-            Text("Sağa ${a.marginRightDeg.f1()}°, sola ${a.marginLeftDeg.f1()}° pay", style = MaterialTheme.typography.bodySmall)
+            Text("Pay: ekranın sağına ${a.marginRightDeg.f1()}°, soluna ${a.marginLeftDeg.f1()}°", style = MaterialTheme.typography.bodySmall)
             if (a.partlyAboveEntry) {
                 Text("Boyamanın bir kısmı giriş noktasının üstünde; hesapta yok sayıldı.", color = MaterialTheme.colorScheme.error)
             }
@@ -532,6 +569,7 @@ private fun CenterTools(s: ImagePlanState, a: LesionAnalysis) {
 private fun ValuesForm(s: ImagePlanState) {
     Card {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            PositionSelector(s.prone) { s.prone = it }
             NumberField("Lezyon derinliği (cm)", s.depthCm) { s.depthCm = it }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ChoiceButton("İğne yolu boyunca", s.depthAlongPath, Modifier.weight(1f)) { s.depthAlongPath = true }
@@ -557,12 +595,12 @@ private fun ResultCard(plan: NeedlePlan?, a: LesionAnalysis?, s: ImagePlanState)
             BigValue("İğne yolu", "${plan.depthCm.f1()} cm", if (s.depthAlongPath) "elle girildi" else "dikey derinlikten")
             BigValue(
                 "Açı", "${abs(plan.axialAngleDeg).f1()}°",
-                "iğne ucu ${lateralWord(plan.axialAngleDeg).lowercase()}" +
+                "iğne ucu ${lateralWord(plan.axialAngleDeg, plan.prone).lowercase()}" +
                     if (plan.axialAngleIsManual) " · elle" else if (a.aimIsCustom) " · seçilen hedefe" else " · lezyon merkezine",
             )
             BigValue(
                 "Tolerans", "±${(plan.toleranceDeg ?: 1.0).f1()}°",
-                "boyanan lezyondan · sağa ${a.marginRightDeg.f1()}°, sola ${a.marginLeftDeg.f1()}°",
+                "boyanan lezyondan · ekranın sağına ${a.marginRightDeg.f1()}°, soluna ${a.marginLeftDeg.f1()}°",
             )
             if (a.toleranceDeg < 1.0) {
                 Text("Tolerans çok dar: lezyon küçük ya da derin. Dikkatli ilerleyin.", color = MaterialTheme.colorScheme.error)

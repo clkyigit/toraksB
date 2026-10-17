@@ -111,9 +111,18 @@ fun GuideScreen(
             )
         }
 
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            GuideValue("Derinlik", "${plan.depthCm.f1()} cm", null, Modifier.weight(1f))
+            GuideValue(
+                "Orta hattan",
+                plan.skinMarkCm?.let { "${it.f1()} cm" } ?: "—",
+                plan.skinMarkCm?.let { if (plan.skinMarkLeft) "hastanın solu" else "hastanın sağı" },
+                Modifier.weight(1f),
+            )
+        }
         Text(
-            "Derinlik: ${plan.depthCm.f1()} cm",
-            fontSize = 34.sp, fontWeight = FontWeight.Bold,
+            if (plan.prone) "Hasta yüzüstü (sırttan giriş)" else "Hasta sırtüstü",
+            style = MaterialTheme.typography.bodySmall,
         )
 
         AxialGauge(
@@ -123,16 +132,16 @@ fun GuideScreen(
             modifier = Modifier.fillMaxWidth().height(220.dp),
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Hastanın SAĞI", style = MaterialTheme.typography.labelMedium)
-            Text("Hastanın SOLU", style = MaterialTheme.typography.labelMedium)
+            Text(screenLeftSide(plan.prone), style = MaterialTheme.typography.labelMedium)
+            Text(screenRightSide(plan.prone), style = MaterialTheme.typography.labelMedium)
         }
 
         AngleRow(
             title = "Aksiyel",
             target = plan.axialAngleDeg, current = o.axialDeg, ok = axialOk,
-            instruction = if (axialDiff > 0) "Ucu hastanın SOLUNA (ekranın sağına) yatırın"
-            else "Ucu hastanın SAĞINA (ekranın soluna) yatırın",
-            word = ::lateralWord,
+            instruction = if (axialDiff > 0) "Ucu ${lateralWord(1.0, plan.prone)} (ekranın sağına) yatırın"
+            else "Ucu ${lateralWord(-1.0, plan.prone)} (ekranın soluna) yatırın",
+            word = { lateralWord(it, plan.prone) },
         )
         AngleRow(
             title = "Kranyokaudal",
@@ -239,4 +248,13 @@ private fun rememberWithin(diff: Double, tolerance: Float): Boolean {
     val inside = remember { BooleanArray(1) }
     inside[0] = if (inside[0]) diff <= tolerance * 1.5 else diff <= tolerance
     return inside[0]
+}
+
+@Composable
+private fun GuideValue(label: String, value: String, note: String?, modifier: Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Text(value, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+        note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+    }
 }

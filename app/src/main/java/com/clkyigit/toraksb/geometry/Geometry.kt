@@ -41,10 +41,12 @@ data class PlanInput(
     val depthOverrideCm: Double? = null,
     /** Doktor aksiyel açıyı konsolda ölçtüyse; null ise hesaplanan kullanılır. */
     val axialAngleOverrideDeg: Double? = null,
+    /** Yüzüstü (sırttan giriş): ayak ucundan bakınca hastanın sağı ekranın SAĞINDA. */
+    val prone: Boolean = false,
 )
 
 data class NeedlePlan(
-    /** Aksiyel düzlemde, masaya dik eksenden sapma. + = iğne ucu hastanın SOLUNA doğru. */
+    /** Aksiyel düzlemde, masaya dik eksenden sapma. + = iğne ucu EKRANIN SAĞINA (sırtüstüde hastanın solu). */
     val axialAngleDeg: Double,
     /** Kranyokaudal açı. + = iğne ucu KAUDALE doğru. */
     val craniocaudalAngleDeg: Double,
@@ -57,6 +59,11 @@ data class NeedlePlan(
     /** Lezyon boyutundan hesaplanan izin verilen açı sapması (derece); bilinmiyorsa null. */
     val toleranceDeg: Double? = null,
     val lesionSizeCm: Double? = null,
+    /** Yüzüstü hasta (sırttan giriş): sağ/sol yazıları ters çevrilir; açılar ekran yönünde aynıdır. */
+    val prone: Boolean = false,
+    /** Cilt işareti: giriş noktasının orta hatta uzaklığı ve hastanın hangi tarafı. */
+    val skinMarkCm: Double? = null,
+    val skinMarkLeft: Boolean = false,
     /** Plan girdileri ve görüntüden çıkan veriler (sütun adı → değer); çalışma kaydı ve özet için. */
     val details: Map<String, String> = emptyMap(),
 ) : java.io.Serializable
@@ -114,8 +121,10 @@ object PlanCalculator {
 
     fun compute(input: PlanInput): NeedlePlan {
         require(input.verticalDepthCm > 0) { "Dikey derinlik 0'dan büyük olmalı" }
-        val xEntry = input.entrySide.sign * input.entryFromMidlineCm
-        val xTarget = input.targetSide.sign * input.targetFromMidlineCm
+        // Ekran koordinatı (+ = ekranın sağı). Sırtüstüde hastanın solu sağda, yüzüstüde tersi.
+        val k = if (input.prone) -1.0 else 1.0
+        val xEntry = k * input.entrySide.sign * input.entryFromMidlineCm
+        val xTarget = k * input.targetSide.sign * input.targetFromMidlineCm
         return fromDeltas(
             dxCm = xTarget - xEntry,
             verticalDepthCm = input.verticalDepthCm,

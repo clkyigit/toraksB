@@ -58,6 +58,7 @@ class PlanFormState {
     var angleOverride by mutableStateOf("")
     var angleTowardLeft by mutableStateOf(true)
     var lesionCm by mutableStateOf("")
+    var prone by mutableStateOf(false)
 
     fun toInput(): PlanInput? {
         val entry = entryCm.num() ?: return null
@@ -68,9 +69,10 @@ class PlanFormState {
             depthOverride.num()?.takeIf { it > 0 } ?: return null
         } else null
         val aOverride = if (manualAngle) {
-            (angleOverride.num() ?: return null) * if (angleTowardLeft) 1 else -1
+            // Elle açı hastaya göre girilir; ekran yönüne çevir
+            (angleOverride.num() ?: return null) * (if (angleTowardLeft) 1 else -1) * (if (prone) -1 else 1)
         } else null
-        return PlanInput(entry, entrySide, target, targetSide, depth, cc, dOverride, aOverride)
+        return PlanInput(entry, entrySide, target, targetSide, depth, cc, dOverride, aOverride, prone)
     }
 
     companion object {
@@ -78,7 +80,7 @@ class PlanFormState {
             save = {
                 listOf(it.entryCm, it.entrySide.name, it.targetCm, it.targetSide.name,
                     it.verticalDepthCm, it.ccCm, it.ccCaudal, it.manualDepth, it.depthOverride,
-                    it.manualAngle, it.angleOverride, it.angleTowardLeft, it.lesionCm)
+                    it.manualAngle, it.angleOverride, it.angleTowardLeft, it.lesionCm, it.prone)
             },
             restore = { l ->
                 PlanFormState().apply {
@@ -89,6 +91,7 @@ class PlanFormState {
                     manualAngle = l[9] as Boolean; angleOverride = l[10] as String
                     angleTowardLeft = l[11] as Boolean
                     lesionCm = l.getOrNull(12) as? String ?: ""
+                    prone = l.getOrNull(13) as? Boolean ?: false
                 }
             },
         )
@@ -99,7 +102,18 @@ internal fun String.num(): Double? = trim().replace(',', '.').toDoubleOrNull()?.
 
 internal fun Double.f1(): String = String.format(Locale("tr"), "%.1f", this)
 
-internal fun lateralWord(deg: Double) = if (deg >= 0) "hastanın SOLUNA" else "hastanın SAĞINA"
+/**
+ * + açı = ekranın sağı. Sırtüstü hastada ekranın sağı hastanın SOLU, yüzüstüde (sırttan giriş) SAĞI.
+ */
+internal fun lateralWord(deg: Double, prone: Boolean = false): String {
+    val towardScreenRight = deg >= 0
+    val patientLeft = if (prone) !towardScreenRight else towardScreenRight
+    return if (patientLeft) "hastanın SOLUNA" else "hastanın SAĞINA"
+}
+
+/** Ekranın sağ / sol kenarı hastanın hangi tarafı. */
+internal fun screenRightSide(prone: Boolean) = if (prone) "Hastanın SAĞI" else "Hastanın SOLU"
+internal fun screenLeftSide(prone: Boolean) = if (prone) "Hastanın SOLU" else "Hastanın SAĞI"
 internal fun ccWord(deg: Double) = if (deg >= 0) "KAUDALE" else "KRANİALE"
 
 @Composable
@@ -118,8 +132,12 @@ fun PlanScreen(
         p.copy(
             toleranceDeg = PlanCalculator.toleranceFor(lesion, p.depthCm),
             lesionSizeCm = lesion,
+            prone = form.prone,
+            skinMarkCm = form.entryCm.num(),
+            skinMarkLeft = form.entrySide == Side.LEFT,
             details = linkedMapOf(
                 "kaynak" to "elle",
+                "hasta_pozisyonu" to if (form.prone) "yuzustu" else "sirtustu",
                 "giris_orta_hat_cm" to n(form.entryCm.num()),
                 "giris_taraf" to if (form.entrySide == Side.LEFT) "sol" else "sag",
                 "hedef_orta_hat_cm" to n(form.targetCm.num()),
@@ -148,6 +166,7 @@ fun PlanScreen(
         Text("Elle giriş (yedek)", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text("BT konsolunda ölçtüğünüz değerleri girin. Görüntüden planlamaya dönmek için geri tuşunu kullanın.", style = MaterialTheme.typography.bodySmall)
         DisclaimerCard()
+        PositionSelector(form.prone) { form.prone = it }
 
         SectionTitle("Cilt giriş noktası")
         CmField("Orta hatta uzaklık (cm)", form.entryCm) { form.entryCm = it }
@@ -215,7 +234,7 @@ private fun ResultCard(plan: NeedlePlan?) {
             }
             Text("Plan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Aksiyel açı: ${abs(plan.axialAngleDeg).f1()}° — iğne ucu ${lateralWord(plan.axialAngleDeg)}" +
+                "Aksiyel açı: ${abs(plan.axialAngleDeg).f1()}° — iğne ucu ${lateralWord(plan.axialAngleDeg, plan.prone)}" +
                     if (plan.axialAngleIsManual) "  (elle; hesaplanan ${plan.calculatedAxialAngleDeg.f1()}°)" else ""
             )
             if (abs(plan.craniocaudalAngleDeg) >= 0.05) {
@@ -292,5 +311,19 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = onChange)
+    }
+}
+
+/** Hasta pozisyonu: sağ/sol yazılarını belirler. Açı hesabını değiştirmez. */
+@Composable
+internal fun PositionSelector(prone: Boolean, onChange: (Boolean) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Hasta pozisyonu", fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!prone) Button(onClick = { onChange(false) }, modifier = Modifier.weight(1f)) { Text("Sırtüstü") }
+            else OutlinedButton(onClick = { onChange(false) }, modifier = Modifier.weight(1f)) { Text("Sırtüstü") }
+            if (prone) Button(onClick = { onChange(true) }, modifier = Modifier.weight(1f)) { Text("Yüzüstü (sırttan)") }
+            else OutlinedButton(onClick = { onChange(true) }, modifier = Modifier.weight(1f)) { Text("Yüzüstü (sırttan)") }
+        }
     }
 }
