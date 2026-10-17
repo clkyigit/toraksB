@@ -5,6 +5,20 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -29,6 +43,7 @@ import com.clkyigit.toraksb.ui.PlanScreen
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLog.install(this)
         enableEdgeToEdge()
         setContent {
             MaterialTheme {
@@ -53,6 +68,8 @@ private fun ToraksApp() {
 
     val toCalibration = { screen = Screen.CALIBRATION }
     val toGuide = { p: NeedlePlan -> plan = p; screen = Screen.GUIDE }
+
+    CrashReportDialog()
 
     BackHandler(enabled = screen != Screen.IMAGE) {
         if (screen == Screen.MANUAL) planScreen = Screen.IMAGE
@@ -108,4 +125,28 @@ private fun ToraksApp() {
             }
         }
     }
+}
+
+@Composable
+private fun CrashReportDialog() {
+    val context = LocalContext.current
+    var report by remember { mutableStateOf(CrashLog.read(context)) }
+    val text = report ?: return
+    val clipboard = LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = { CrashLog.clear(context); report = null },
+        title = { Text("Uygulama önceki açılışta kapandı") },
+        text = {
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                Text("Bu hata kaydını kopyalayıp geliştiriciye gönderin:")
+                Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { clipboard.setText(AnnotatedString(text)) }) { Text("Kopyala") }
+        },
+        dismissButton = {
+            TextButton(onClick = { CrashLog.clear(context); report = null }) { Text("Kapat") }
+        },
+    )
 }
