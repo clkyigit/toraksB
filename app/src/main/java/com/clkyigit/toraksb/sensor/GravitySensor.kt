@@ -17,22 +17,49 @@ data class Gravity(val x: Double, val y: Double, val z: Double) {
     companion object { val ZERO = Gravity(0.0, 0.0, 0.0) }
 }
 
+enum class SensorSource(val label: String) {
+    GYRO_FUSION("Jiroskop + ivmeölçer"),
+    GRAVITY("Yerçekimi sensörü"),
+    ACCELEROMETER("Yalnız ivmeölçer"),
+}
+
 /**
- * TYPE_GRAVITY (ivmeölçer + jiroskop füzyonu) varsa onu, yoksa düşük geçiren filtreli
- * ivmeölçeri kullanır. Manyetometre kullanılmaz: BT odasında güvenilmez.
+ * Yön kaynağı, en iyiden başlayarak:
+ *  1. TYPE_GAME_ROTATION_VECTOR: jiroskop + ivmeölçer füzyonu, manyetometre YOK
+ *     (BT odasındaki metalden etkilenmez). Hızlı ve titremesiz; yerçekimi yönü
+ *     dönüş matrisinin üçüncü satırından alınır.
+ *  2. TYPE_GRAVITY
+ *  3. Filtreli TYPE_ACCELEROMETER
+ * Yaklaşık 100 Hz örneklenir; ekran güncellemesi saniyede ~30 kez ile sınırlanır.
  */
 class GravitySensor(context: Context, private val onUpdate: (Gravity) -> Unit) : SensorEventListener {
     private val manager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
-    private val gravitySensor: Sensor? = manager.getDefaultSensor(Sensor.TYPE_GRAVITY)
-    private val sensor: Sensor? = gravitySensor ?: manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
-    private val alpha = if (gravitySensor != null) 0.25 else 0.08
+    private val rotation: Sensor? = manager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+    private val gravity: Sensor? = manager.getDefaultSensor(Sensor.TYPE_GRAVITY)
+    private val accel: Sensor? = manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+    val source: SensorSource? = when {
+        rotation != null -> SensorSource.GYRO_FUSION
+        gravity != null -> SensorSource.GRAVITY
+        accel != null -> SensorSource.ACCELEROMETER
+        else -> null
+    }
+    private val sensor: Sensor? = rotation ?: gravity ?: accel
+
+    /** Füzyon kaynakları zaten temiz; yalnız ivmeölçerde güçlü filtre gerekir. */
+    private val alpha = when (source) {
+        SensorSource.GYRO_FUSION -> 0.6
+        SensorSource.GRAVITY -> 0.35
+        else -> 0.08
+    }
+    private val r = FloatArray(9)
     private var filtered: DoubleArray? = null
+    private var lastEmitNs = 0L
 
     val available: Boolean get() = sensor != null
-    val usingFusedGravity: Boolean get() = gravitySensor != null
 
     fun start() {
-        sensor?.let { manager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+        sensor?.let { manager.registerListener(this, it, 10_000) } // ~100 Hz
     }
 
     fun stop() {
@@ -41,21 +68,36 @@ class GravitySensor(context: Context, private val onUpdate: (Gravity) -> Unit) :
     }
 
     override fun onSensorChanged(event: SensorEvent) {
-        val v = event.values
+        val vx: Double; val vy: Double; val vz: Double
+        if (event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR) {
+            SensorManager.getRotationMatrixFromVector(r, event.values)
+            // Dünyanın "yukarı" ekseninin telefon koordinatındaki karşılığı = R'nin 3. satırı
+            vx = r[6] * SensorManager.GRAVITY_EARTH.toDouble()
+            vy = r[7] * SensorManager.GRAVITY_EARTH.toDouble()
+            vz = r[8] * SensorManager.GRAVITY_EARTH.toDouble()
+        } else {
+            vx = event.values[0].toDouble(); vy = event.values[1].toDouble(); vz = event.values[2].toDouble()
+        }
         val f = filtered
         if (f == null) {
-            filtered = doubleArrayOf(v[0].toDouble(), v[1].toDouble(), v[2].toDouble())
+            filtered = doubleArrayOf(vx, vy, vz)
         } else {
-            for (i in 0..2) f[i] += alpha * (v[i] - f[i])
+            f[0] += alpha * (vx - f[0]); f[1] += alpha * (vy - f[1]); f[2] += alpha * (vz - f[2])
         }
-        val r = filtered!!
-        onUpdate(Gravity(r[0], r[1], r[2]))
+        if (event.timestamp - lastEmitNs >= 33_000_000L) {
+            lastEmitNs = event.timestamp
+            val o = filtered!!
+            onUpdate(Gravity(o[0], o[1], o[2]))
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 }
 
-class GravityState(val gravity: State<Gravity>, val available: Boolean, val fused: Boolean)
+class GravityState(val gravity: State<Gravity>, val available: Boolean, val source: SensorSource?) {
+    /** Eski çağrılar için: füzyonlu (temiz) kaynak mı. */
+    val fused: Boolean get() = source != SensorSource.ACCELEROMETER
+}
 
 @Composable
 fun rememberGravity(): GravityState {
@@ -66,5 +108,5 @@ fun rememberGravity(): GravityState {
         sensor.start()
         onDispose { sensor.stop() }
     }
-    return remember { GravityState(state, sensor.available, sensor.usingFusedGravity) }
+    return remember { GravityState(state, sensor.available, sensor.source) }
 }

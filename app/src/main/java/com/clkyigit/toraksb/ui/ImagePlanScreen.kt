@@ -73,6 +73,7 @@ import com.clkyigit.toraksb.geometry.ImageMeasurement
 import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.PlanCalculator
 import com.clkyigit.toraksb.geometry.Px
+import com.clkyigit.toraksb.geometry.Side
 import com.clkyigit.toraksb.geometry.TableCalibration
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -97,7 +98,7 @@ enum class Step(val title: String, val hint: String) {
     SCALE_LEN("Cetvel uzunluğu", "Bu çizginin gerçek uzunluğunu santimetre olarak yazın."),
     ENTRY("Cilt giriş noktası", "İğnenin cilde gireceği noktaya dokunun."),
     TARGET("Kitle", "İğne ucunun ulaşacağı noktaya dokunun."),
-    MIDLINE("Orta hat (isteğe bağlı)", "Cilt işareti için orta hatta (vertebra korpusu ortası) dokunun ya da atlayın."),
+    MIDLINE("Orta hat – giriş mesafesi", "Orta hatta (vertebra korpusu ortası) dokunun, mesafeyi elle yazın ya da atlayın."),
     DONE("Plan hazır", ""),
 }
 
@@ -109,6 +110,10 @@ class ImagePlanState {
     var scaleCm by mutableStateOf("")
     var scaleConfirmed by mutableStateOf(false)
     var midlineSkipped by mutableStateOf(false)
+    /** Orta hat – giriş mesafesi elle girildiyse (görüntüden ölçülenin yerine geçer). */
+    var midlineManual by mutableStateOf(false)
+    var midlineCm by mutableStateOf("")
+    var midlineLeft by mutableStateOf(false)
     var ccCm by mutableStateOf("0")
     var ccCaudal by mutableStateOf(true)
     var manualDepth by mutableStateOf(false)
@@ -125,7 +130,7 @@ class ImagePlanState {
             !scaleConfirmed || scaleCm.num()?.takeIf { it > 0 } == null -> Step.SCALE_LEN
             Mark.ENTRY !in marks -> Step.ENTRY
             Mark.TARGET !in marks -> Step.TARGET
-            Mark.MIDLINE !in marks && !midlineSkipped -> Step.MIDLINE
+            Mark.MIDLINE !in marks && !midlineSkipped && !midlineManual -> Step.MIDLINE
             else -> Step.DONE
         }
 
@@ -149,18 +154,30 @@ class ImagePlanState {
 
     fun undo() {
         when {
+            midlineManual -> midlineManual = false
+            midlineSkipped -> midlineSkipped = false
             history.isNotEmpty() -> {
                 val last = history.removeAt(history.lastIndex)
                 marks.remove(last)
                 if (last == Mark.SCALE_B) scaleConfirmed = false
             }
-            midlineSkipped -> midlineSkipped = false
         }
     }
 
     fun restart() {
         marks.clear(); history.clear()
-        scaleConfirmed = false; midlineSkipped = false
+        scaleConfirmed = false; midlineSkipped = false; midlineManual = false
+    }
+
+    /** Cilt işareti: elle girilen değer varsa o, yoksa görüntüden ölçülen. */
+    fun skinMark(m: ImageMeasurement?): Triple<Double, Side, Boolean>? {
+        if (midlineManual) {
+            val cm = midlineCm.num() ?: return null
+            return Triple(cm, if (midlineLeft) Side.LEFT else Side.RIGHT, true)
+        }
+        val cm = m?.entryFromMidlineCm ?: return null
+        val side = m.entrySide ?: return null
+        return Triple(cm, side, false)
     }
 
     fun newImage(path: String) {
@@ -198,7 +215,7 @@ class ImagePlanState {
                 listOf(
                     s.imagePath ?: "", s.history.joinToString(",") { it.name }, s.scaleCm, s.scaleConfirmed,
                     s.midlineSkipped, s.ccCm, s.ccCaudal, s.manualDepth, s.depthOverride, s.manualAngle,
-                    s.angleOverride, s.angleTowardLeft,
+                    s.angleOverride, s.angleTowardLeft, s.midlineManual, s.midlineCm, s.midlineLeft,
                 ) + flat
             },
             restore = { l ->
@@ -211,9 +228,10 @@ class ImagePlanState {
                         manualDepth = l[7] as Boolean; depthOverride = l[8] as String
                         manualAngle = l[9] as Boolean; angleOverride = l[10] as String
                         angleTowardLeft = l[11] as Boolean
+                        midlineManual = l[12] as Boolean; midlineCm = l[13] as String; midlineLeft = l[14] as Boolean
                         Mark.entries.forEachIndexed { i, m ->
-                            val x = l[12 + 2 * i] as Double
-                            val y = l[13 + 2 * i] as Double
+                            val x = l[15 + 2 * i] as Double
+                            val y = l[16 + 2 * i] as Double
                             if (!x.isNaN()) marks[m] = Px(x, y)
                         }
                     }
@@ -321,22 +339,20 @@ fun ImagePlanScreen(
 
             when (step) {
                 Step.SCALE_LEN -> ScaleLengthInput(state)
-                Step.MIDLINE -> OutlinedButton(
-                    onClick = { state.midlineSkipped = true }, modifier = Modifier.fillMaxWidth(),
-                ) { Text("Orta hattı atla") }
+                Step.MIDLINE -> MidlineInput(state)
                 else -> Unit
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
                     onClick = state::undo,
-                    enabled = state.history.isNotEmpty() || state.midlineSkipped,
+                    enabled = state.history.isNotEmpty() || state.midlineSkipped || state.midlineManual,
                 ) { Text("Geri al") }
                 OutlinedButton(onClick = ::takePhoto) { Text("Yeni fotoğraf") }
             }
 
             if (step == Step.DONE) {
-                ResultCard(measurement, plan)
+                ResultCard(measurement, plan, state.skinMark(measurement))
                 TextButton(onClick = { showCorrections = !showCorrections }) {
                     Text(if (showCorrections) "Düzeltmeleri gizle" else "Derinliği / açıyı düzelt, kesit farkı ekle")
                 }
@@ -379,7 +395,7 @@ private fun ScaleLengthInput(state: ImagePlanState) {
 }
 
 @Composable
-private fun ResultCard(m: ImageMeasurement?, plan: NeedlePlan?) {
+private fun ResultCard(m: ImageMeasurement?, plan: NeedlePlan?, skin: Triple<Double, Side, Boolean>?) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (m == null || plan == null) {
@@ -399,8 +415,11 @@ private fun ResultCard(m: ImageMeasurement?, plan: NeedlePlan?) {
             if (abs(plan.craniocaudalAngleDeg) >= 0.05) {
                 BigValue("Kranyokaudal", "${abs(plan.craniocaudalAngleDeg).f1()}°", ccWord(plan.craniocaudalAngleDeg).lowercase())
             }
-            m.entryFromMidlineCm?.let {
-                BigValue("Cilt işareti", "${it.f1()} cm", "orta hattın ${m.entrySide?.label?.lowercase()} tarafında")
+            skin?.let { (cm, side, manual) ->
+                BigValue(
+                    "Cilt işareti", "${cm.f1()} cm",
+                    "orta hattın ${side.label.lowercase()} tarafında" + if (manual) " · elle girildi" else "",
+                )
             }
         }
     }
@@ -420,6 +439,11 @@ private fun BigValue(label: String, value: String, note: String?) {
 @Composable
 private fun Corrections(s: ImagePlanState) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ToggleLine("Orta hat – giriş mesafesini elle gir", s.midlineManual) { s.midlineManual = it }
+        if (s.midlineManual) {
+            NumberField("Orta hattan giriş noktasına (cm)", s.midlineCm) { s.midlineCm = it }
+            ToggleLine("Giriş hastanın solunda (kapalı: sağında)", s.midlineLeft) { s.midlineLeft = it }
+        }
         ToggleLine("Derinliği elle gir", s.manualDepth) { s.manualDepth = it }
         if (s.manualDepth) NumberField("İğne yolu uzunluğu (cm)", s.depthOverride) { s.depthOverride = it }
         ToggleLine("Açıyı elle gir", s.manualAngle) { s.manualAngle = it }
@@ -555,4 +579,34 @@ private fun DrawScope.safeLabel(tm: TextMeasurer, text: String, at: Offset, colo
     val y = at.y.coerceIn(0f, max(0f, size.height - layout.size.height))
     if (at.x > size.width || at.y > size.height || at.x < -layout.size.width || at.y < -layout.size.height) return
     drawText(layout, topLeft = Offset(x, y))
+}
+
+@Composable
+private fun MidlineInput(s: ImagePlanState) {
+    var cm by remember { mutableStateOf(s.midlineCm) }
+    var left by remember { mutableStateOf(s.midlineLeft) }
+    val valid = cm.num() != null
+    Card {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("ya da mesafeyi elle girin", fontWeight = FontWeight.SemiBold)
+            NumberField("Orta hattan giriş noktasına (cm)", cm) { cm = it }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SideButton("Hastanın sağı", !left, Modifier.weight(1f)) { left = false }
+                SideButton("Hastanın solu", left, Modifier.weight(1f)) { left = true }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { s.midlineSkipped = true }, modifier = Modifier.weight(1f)) { Text("Atla") }
+                Button(
+                    onClick = { s.midlineCm = cm; s.midlineLeft = left; s.midlineManual = true },
+                    enabled = valid, modifier = Modifier.weight(1f),
+                ) { Text("Kaydet") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SideButton(text: String, selected: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    if (selected) Button(onClick = onClick, modifier = modifier) { Text(text) }
+    else OutlinedButton(onClick = onClick, modifier = modifier) { Text(text) }
 }

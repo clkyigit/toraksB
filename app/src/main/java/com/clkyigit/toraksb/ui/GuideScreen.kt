@@ -41,7 +41,9 @@ import androidx.compose.ui.unit.sp
 import com.clkyigit.toraksb.geometry.NeedlePlan
 import com.clkyigit.toraksb.geometry.OrientationMath
 import com.clkyigit.toraksb.geometry.TableCalibration
+import com.clkyigit.toraksb.sensor.SensorSource
 import com.clkyigit.toraksb.sensor.rememberGravity
+import androidx.compose.runtime.remember
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
@@ -65,8 +67,9 @@ fun GuideScreen(
 
     val axialDiff = plan.axialAngleDeg - o.axialDeg
     val ccDiff = plan.craniocaudalAngleDeg - o.craniocaudalDeg
-    val axialOk = abs(axialDiff) <= tolerance
-    val ccOk = abs(ccDiff) <= tolerance
+    // Histerezis: hedefe girince yeşil yanar, ancak toleransın 1,5 katı aşılınca söner (titreme olmaz)
+    val axialOk = rememberWithin(abs(axialDiff), tolerance)
+    val ccOk = rememberWithin(abs(ccDiff), tolerance)
     val allOk = o.reliable && axialOk && ccOk
 
     val view = LocalView.current
@@ -139,6 +142,11 @@ fun GuideScreen(
             word = ::ccWord,
         )
 
+        Text(
+            "Sensör: ${g.source?.label ?: "bulunamadı"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (g.source == SensorSource.ACCELEROMETER) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+        )
         Text("Tolerans: ±${tolerance.toDouble().f1()}°", style = MaterialTheme.typography.bodyMedium)
         Slider(value = tolerance, onValueChange = { tolerance = it }, valueRange = 0.5f..5f, steps = 8)
 
@@ -216,4 +224,12 @@ private fun DrawScope.needle(center: Offset, r: Float, deg: Double, color: Color
 private fun polar(c: Offset, r: Float, deg: Double): Offset {
     val t = Math.toRadians(deg)
     return Offset(c.x + r * sin(t).toFloat(), c.y + r * cos(t).toFloat())
+}
+
+@Composable
+private fun rememberWithin(diff: Double, tolerance: Float): Boolean {
+    // Gözlenmeyen tutucu: kompozisyon sırasında yazmak yeniden çizim döngüsü başlatmaz
+    val inside = remember { BooleanArray(1) }
+    inside[0] = if (inside[0]) diff <= tolerance * 1.5 else diff <= tolerance
+    return inside[0]
 }
