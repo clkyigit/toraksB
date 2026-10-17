@@ -8,6 +8,23 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.material3.Slider
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.platform.LocalDensity
+import com.clkyigit.toraksb.geometry.Dab
+import com.clkyigit.toraksb.geometry.LesionAnalysis
+import com.clkyigit.toraksb.geometry.LesionMask
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -77,30 +94,38 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
 
-/** Görüntüde işaretlenen iki nokta. */
+/** Görüntüde dokunularak işaretlenen nokta (lezyon boyanır). */
 enum class Mark(val label: String, val color: Color) {
     ENTRY("Giriş", Color(0xFF00E5FF)),
-    TARGET("Lezyon", Color(0xFFFF4081)),
 }
+
+private val LesionColor = Color(0xFFFF4081)
 
 enum class Step(val title: String, val hint: String) {
     PHOTO("BT görüntüsü", "Konsolda lezyonun ve giriş noktasının göründüğü aksiyel kesiti açın, ekrana tam karşıdan fotoğraflayın."),
     ENTRY("Cilt giriş noktası", "İğnenin cilde gireceği noktaya dokunun."),
-    TARGET("Lezyon", "Lezyonun ortasına dokunun."),
-    VALUES("Ölçümler", "Konsolda ölçtüğünüz değerleri girin."),
+    PAINT("Lezyonu boyayın", "Lezyonu tek parmakla boyayın. İki parmakla yakınlaştırın. Bitince \"Boyama bitti\"ye basın."),
+    VALUES("Ölçümler", "Konsolda ölçtüğünüz lezyon derinliğini girin."),
     DONE("Plan hazır", ""),
 }
 
 class ImagePlanState {
     var imagePath by mutableStateOf<String?>(null)
     val marks = mutableStateMapOf<Mark, Px>()
-    val history = mutableStateListOf<Mark>()
+
+    /** Boyama: fırça damgaları ve her fırça darbesinin başladığı indeks (geri alma için). */
+    val dabs = mutableStateListOf<Dab>()
+    val strokeStarts = mutableStateListOf<Int>()
+    var paintDone by mutableStateOf(false)
+    var erasing by mutableStateOf(false)
+    var brushDp by mutableFloatStateOf(14f)
+    /** Maske her değiştiğinde artar (yeniden çizim/analiz tetikler). */
+    var maskVersion by mutableIntStateOf(0)
+    private var mask: LesionMask? = null
 
     /** Lezyon derinliği (cm) ve ölçüm biçimi. */
     var depthCm by mutableStateOf("")
     var depthAlongPath by mutableStateOf(true)
-    /** Lezyon boyutu (cm) → tolerans açısı. */
-    var lesionCm by mutableStateOf("")
     /** Orta hattan giriş noktasına (cm) ve taraf. */
     var midlineCm by mutableStateOf("")
     var midlineLeft by mutableStateOf(false)
@@ -111,45 +136,88 @@ class ImagePlanState {
     var angleOverride by mutableStateOf("")
     var angleTowardLeft by mutableStateOf(true)
 
+    /** Giriş noktasını yeniden yerleştirme modu. */
+    var movingEntry by mutableStateOf(false)
+
+    fun ensureMask(w: Int, h: Int) {
+        val m = mask
+        if (m == null || m.imageWidth != w || m.imageHeight != h) {
+            mask = LesionMask(w, h).also { it.stampAll(dabs) }
+            maskVersion++
+        }
+    }
+
+    fun maskOrNull(): LesionMask? = mask
+
+    private var cacheKey: Pair<Int, Px?>? = null
+    private var cacheVal: LesionAnalysis? = null
+
+    fun analysis(): LesionAnalysis? {
+        val v = maskVersion // okunarak değişiklikte yeniden hesaplanması sağlanır
+        val e = marks[Mark.ENTRY] ?: return null
+        val key = v to e
+        if (key != cacheKey) {
+            cacheVal = mask?.analyze(e)
+            cacheKey = key
+        }
+        return cacheVal
+    }
+
     val step: Step
         get() = when {
             imagePath == null -> Step.PHOTO
             Mark.ENTRY !in marks -> Step.ENTRY
-            Mark.TARGET !in marks -> Step.TARGET
+            !paintDone || analysis() == null -> Step.PAINT
             depthCm.num()?.takeIf { it > 0 } == null -> Step.VALUES
             else -> Step.DONE
         }
 
-    val placing: Mark?
-        get() = when (step) {
-            Step.ENTRY -> Mark.ENTRY
-            Step.TARGET -> Mark.TARGET
-            else -> null
+    val painting: Boolean get() = !movingEntry && step == Step.PAINT && imagePath != null
+
+    fun tap(p: Px) {
+        if (movingEntry || step == Step.ENTRY) {
+            marks[Mark.ENTRY] = p
+            movingEntry = false
+            maskVersion++
         }
-
-    /** Değerler girildikten sonra da noktalar yeniden yerleştirilebilir: seçili nokta. */
-    var editing by mutableStateOf<Mark?>(null)
-
-    fun place(p: Px) {
-        val m = editing ?: placing ?: return
-        marks[m] = p
-        history.remove(m); history.add(m)
-        editing = null
     }
 
-    fun undo() {
-        if (history.isNotEmpty()) marks.remove(history.removeAt(history.lastIndex))
-        editing = null
+    fun beginStroke() { strokeStarts.add(dabs.size) }
+
+    fun addDab(d: Dab) {
+        dabs.add(d)
+        mask?.stamp(d)
+        maskVersion++
+    }
+
+    /** İkinci parmak gelince yanlışlıkla başlayan fırça darbesini iptal et. */
+    fun cancelStroke() {
+        val start = strokeStarts.removeLastOrNull() ?: return
+        while (dabs.size > start) dabs.removeAt(dabs.lastIndex)
+        rebuild()
+    }
+
+    fun undoStroke() = cancelStroke()
+
+    fun clearPaint() {
+        dabs.clear(); strokeStarts.clear(); rebuild()
+    }
+
+    private fun rebuild() {
+        mask?.stampAll(dabs)
+        maskVersion++
     }
 
     fun newImage(path: String) {
         imagePath = path
-        marks.clear(); history.clear(); editing = null
+        marks.clear(); dabs.clear(); strokeStarts.clear()
+        paintDone = false; movingEntry = false; erasing = false
+        mask = null; maskVersion++
     }
 
     fun plan(): NeedlePlan? {
         val e = marks[Mark.ENTRY] ?: return null
-        val t = marks[Mark.TARGET] ?: return null
+        val a = analysis() ?: return null
         val depth = depthCm.num()?.takeIf { it > 0 } ?: return null
         val cc = (ccCm.num() ?: 0.0) * if (ccCaudal) 1 else -1
         val angle = if (manualAngle) {
@@ -157,47 +225,46 @@ class ImagePlanState {
         } else null
         return runCatching {
             PlanCalculator.fromImageAngle(
-                dxPx = t.x - e.x, dyPx = t.y - e.y,
+                dxPx = a.centroid.x - e.x, dyPx = a.centroid.y - e.y,
                 depthCm = depth, depthAlongPath = depthAlongPath,
-                lesionSizeCm = lesionCm.num()?.takeIf { it > 0 },
                 craniocaudalCm = cc, axialAngleOverrideDeg = angle,
-            )
+            ).copy(toleranceDeg = a.toleranceDeg.coerceIn(0.5, 10.0))
         }.getOrNull()
     }
-
-    val lesionAboveEntry: Boolean
-        get() {
-            val e = marks[Mark.ENTRY] ?: return false
-            val t = marks[Mark.TARGET] ?: return false
-            return t.y <= e.y
-        }
 
     companion object {
         val Saver = listSaver<ImagePlanState, Any>(
             save = { s ->
-                val flat = Mark.entries.flatMap { m ->
-                    s.marks[m]?.let { listOf(it.x, it.y) } ?: listOf(Double.NaN, Double.NaN)
+                val e = s.marks[Mark.ENTRY]
+                val flat = FloatArray(s.dabs.size * 4).also { a ->
+                    s.dabs.forEachIndexed { i, d ->
+                        a[4 * i] = d.x.toFloat(); a[4 * i + 1] = d.y.toFloat()
+                        a[4 * i + 2] = d.r.toFloat(); a[4 * i + 3] = if (d.erase) 1f else 0f
+                    }
                 }
                 listOf(
-                    s.imagePath ?: "", s.history.joinToString(",") { it.name },
-                    s.depthCm, s.depthAlongPath, s.lesionCm, s.midlineCm, s.midlineLeft,
+                    s.imagePath ?: "", e?.x ?: Double.NaN, e?.y ?: Double.NaN,
+                    flat, s.strokeStarts.toIntArray(), s.paintDone, s.brushDp,
+                    s.depthCm, s.depthAlongPath, s.midlineCm, s.midlineLeft,
                     s.ccCm, s.ccCaudal, s.manualAngle, s.angleOverride, s.angleTowardLeft,
-                ) + flat
+                )
             },
             restore = { l ->
                 runCatching {
                     ImagePlanState().apply {
                         imagePath = (l[0] as String).ifEmpty { null }
-                        (l[1] as String).split(',').filter { it.isNotEmpty() }.forEach { history.add(Mark.valueOf(it)) }
-                        depthCm = l[2] as String; depthAlongPath = l[3] as Boolean; lesionCm = l[4] as String
-                        midlineCm = l[5] as String; midlineLeft = l[6] as Boolean
-                        ccCm = l[7] as String; ccCaudal = l[8] as Boolean
-                        manualAngle = l[9] as Boolean; angleOverride = l[10] as String; angleTowardLeft = l[11] as Boolean
-                        Mark.entries.forEachIndexed { i, m ->
-                            val x = l[12 + 2 * i] as Double
-                            val y = l[13 + 2 * i] as Double
-                            if (!x.isNaN()) marks[m] = Px(x, y)
+                        val ex = l[1] as Double; val ey = l[2] as Double
+                        if (!ex.isNaN()) marks[Mark.ENTRY] = Px(ex, ey)
+                        val f = l[3] as FloatArray
+                        for (i in 0 until f.size / 4) {
+                            dabs.add(Dab(f[4 * i].toDouble(), f[4 * i + 1].toDouble(), f[4 * i + 2].toDouble(), f[4 * i + 3] > 0.5f))
                         }
+                        (l[4] as IntArray).forEach { strokeStarts.add(it) }
+                        paintDone = l[5] as Boolean; brushDp = l[6] as Float
+                        depthCm = l[7] as String; depthAlongPath = l[8] as Boolean
+                        midlineCm = l[9] as String; midlineLeft = l[10] as Boolean
+                        ccCm = l[11] as String; ccCaudal = l[12] as Boolean
+                        manualAngle = l[13] as Boolean; angleOverride = l[14] as String; angleTowardLeft = l[15] as Boolean
                     }
                 }.getOrElse { ImagePlanState() }
             },
@@ -266,14 +333,16 @@ fun ImagePlanScreen(
         val p = state.imagePath
         image = if (p == null) null else withContext(Dispatchers.IO) { decode(p) }
         loadError = p != null && image == null
+        image?.let { state.ensureMask(it.width, it.height) }
     }
 
     val step = if (image == null) Step.PHOTO else state.step
+    val analysis = state.analysis()
     val plan = state.plan()
     val stepNo = Step.entries.indexOf(step) + 1
 
     Column(
-        modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier.fillMaxSize().verticalScroll(rememberScrollState(), enabled = !state.painting).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -283,16 +352,15 @@ fun ImagePlanScreen(
 
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                val editing = state.editing
                 Text(
                     when {
-                        editing != null -> "${editing.label} noktasını yeniden yerleştirin"
+                        state.movingEntry -> "Giriş noktasını yeniden yerleştirin"
                         step == Step.DONE -> "Plan hazır"
                         else -> "Adım $stepNo / ${Step.entries.size - 1} · ${step.title}"
                     },
                     style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
                 )
-                if (editing != null) Text("Görüntüde yeni yerine dokunun.")
+                if (state.movingEntry) Text("Görüntüde yeni yerine dokunun.")
                 else if (step.hint.isNotEmpty()) Text(step.hint)
                 if (loadError) Text("Fotoğraf açılamadı. Tekrar deneyin.", color = MaterialTheme.colorScheme.error)
             }
@@ -303,29 +371,22 @@ fun ImagePlanScreen(
             Button(onClick = ::takePhoto, modifier = Modifier.fillMaxWidth().height(56.dp)) { Text("Ekranı fotoğrafla") }
             OutlinedButton(onClick = ::pickPhoto, modifier = Modifier.fillMaxWidth()) { Text("Galeriden seç") }
         } else {
-            MarkCanvas(img, state)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = state::undo, enabled = state.history.isNotEmpty()) { Text("Geri al") }
-                if (Mark.ENTRY in state.marks && Mark.TARGET in state.marks) {
-                    OutlinedButton(onClick = { state.editing = Mark.ENTRY }) { Text("Girişi taşı") }
-                    OutlinedButton(onClick = { state.editing = Mark.TARGET }) { Text("Lezyonu taşı") }
+            MarkCanvas(img, state, analysis)
+
+            if (state.painting) {
+                PaintTools(state, analysis)
+            } else if (Mark.ENTRY in state.marks) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { state.movingEntry = true }) { Text("Girişi taşı") }
+                    if (state.paintDone) OutlinedButton(onClick = { state.paintDone = false }) { Text("Lezyonu düzenle") }
                 }
             }
             TextButton(onClick = ::takePhoto) { Text("Yeni fotoğraf") }
 
-            if (state.lesionAboveEntry) {
-                Text(
-                    "Lezyon giriş noktasının üstünde işaretlenmiş. Noktaları kontrol edin.",
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
-
-            if (step == Step.VALUES || step == Step.DONE) {
-                ValuesForm(state)
-            }
+            if (step == Step.VALUES || step == Step.DONE) ValuesForm(state)
 
             if (step == Step.DONE) {
-                ResultCard(plan, state)
+                ResultCard(plan, analysis, state)
                 TextButton(onClick = { showMore = !showMore }) {
                     Text(if (showMore) "Ek ayarları gizle" else "Ek ayarlar: açıyı elle gir, kesit farkı")
                 }
@@ -352,6 +413,41 @@ fun ImagePlanScreen(
 }
 
 @Composable
+private fun PaintTools(s: ImagePlanState, a: LesionAnalysis?) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ChoiceButton("Boya", !s.erasing, Modifier.weight(1f)) { s.erasing = false }
+            ChoiceButton("Sil", s.erasing, Modifier.weight(1f)) { s.erasing = true }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Fırça", Modifier.padding(end = 8.dp))
+            Slider(
+                value = s.brushDp, onValueChange = { s.brushDp = it },
+                valueRange = 4f..40f, modifier = Modifier.weight(1f),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = s::undoStroke, enabled = s.strokeStarts.isNotEmpty()) { Text("Geri al") }
+            OutlinedButton(onClick = s::clearPaint, enabled = s.dabs.isNotEmpty()) { Text("Temizle") }
+        }
+        if (a != null) {
+            Text(
+                "Tolerans şu an ±${a.toleranceDeg.f1()}° (sağa ${a.marginRightDeg.f1()}°, sola ${a.marginLeftDeg.f1()}°)",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            if (a.partlyAboveEntry) {
+                Text("Boyamanın bir kısmı giriş noktasının üstünde; hesapta yok sayıldı.", color = MaterialTheme.colorScheme.error)
+            }
+        }
+        Button(
+            onClick = { s.paintDone = true },
+            enabled = a != null,
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+        ) { Text("Boyama bitti") }
+    }
+}
+
+@Composable
 private fun ValuesForm(s: ImagePlanState) {
     Card {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -360,10 +456,6 @@ private fun ValuesForm(s: ImagePlanState) {
                 ChoiceButton("İğne yolu boyunca", s.depthAlongPath, Modifier.weight(1f)) { s.depthAlongPath = true }
                 ChoiceButton("Dikey", !s.depthAlongPath, Modifier.weight(1f)) { s.depthAlongPath = false }
             }
-            NumberField(
-                "Lezyon boyutu (cm)", s.lesionCm,
-                hint = "Tolerans açısını belirler. Boş bırakılırsa ±1°.",
-            ) { s.lesionCm = it }
             NumberField("Orta hattan giriş noktasına (cm)", s.midlineCm, hint = "Cilt işareti için, isteğe bağlı") { s.midlineCm = it }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ChoiceButton("Hastanın sağı", !s.midlineLeft, Modifier.weight(1f)) { s.midlineLeft = false }
@@ -374,22 +466,26 @@ private fun ValuesForm(s: ImagePlanState) {
 }
 
 @Composable
-private fun ResultCard(plan: NeedlePlan?, s: ImagePlanState) {
+private fun ResultCard(plan: NeedlePlan?, a: LesionAnalysis?, s: ImagePlanState) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (plan == null) {
-                Text("Plan hesaplanamadı. Noktaları ve derinliği kontrol edin.", color = MaterialTheme.colorScheme.error)
+            if (plan == null || a == null) {
+                Text("Plan hesaplanamadı. Giriş noktasını, boyamayı ve derinliği kontrol edin.", color = MaterialTheme.colorScheme.error)
                 return@Column
             }
             BigValue("İğne yolu", "${plan.depthCm.f1()} cm", if (s.depthAlongPath) "elle girildi" else "dikey derinlikten")
             BigValue(
                 "Açı", "${abs(plan.axialAngleDeg).f1()}°",
-                "iğne ucu ${lateralWord(plan.axialAngleDeg).lowercase()}" + if (plan.axialAngleIsManual) " · elle" else " · görüntüden",
+                "iğne ucu ${lateralWord(plan.axialAngleDeg).lowercase()}" +
+                    if (plan.axialAngleIsManual) " · elle" else " · lezyon merkezine",
             )
             BigValue(
                 "Tolerans", "±${(plan.toleranceDeg ?: 1.0).f1()}°",
-                plan.lesionSizeCm?.let { "${it.f1()} cm lezyon, ${plan.depthCm.f1()} cm yol" } ?: "varsayılan",
+                "boyanan lezyondan · sağa ${a.marginRightDeg.f1()}°, sola ${a.marginLeftDeg.f1()}°",
             )
+            if (a.toleranceDeg < 1.0) {
+                Text("Tolerans çok dar: lezyon küçük ya da derin. Dikkatli ilerleyin.", color = MaterialTheme.colorScheme.error)
+            }
             if (abs(plan.craniocaudalAngleDeg) >= 0.05) {
                 BigValue("Kranyokaudal", "${abs(plan.craniocaudalAngleDeg).f1()}°", ccWord(plan.craniocaudalAngleDeg).lowercase())
             }
@@ -461,37 +557,86 @@ private fun NumberField(label: String, value: String, hint: String? = null, onCh
 }
 
 @Composable
-private fun MarkCanvas(img: ImageBitmap, state: ImagePlanState) {
+private fun MarkCanvas(img: ImageBitmap, state: ImagePlanState, analysis: LesionAnalysis?) {
     var zoom by remember(img) { mutableFloatStateOf(1f) }
     var pan by remember(img) { mutableStateOf(Offset.Zero) }
     val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val painting = state.painting
+
+    fun viewport(w: Float, h: Float) = Viewport(w, h, img.width, img.height, zoom, pan)
+    fun applyTransform(centroid: Offset, dPan: Offset, dZoom: Float, w: Float, h: Float) {
+        val oldZ = zoom
+        val newZ = (oldZ * dZoom).coerceIn(1f, 12f)
+        val f = newZ / oldZ
+        val c = centroid - Offset(w / 2f, h / 2f)
+        zoom = newZ
+        pan = c - (c - pan) * f + dPan
+    }
+
+    val gestures = if (painting) {
+        Modifier.pointerInput(img, "paint") {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                val w = size.width.toFloat(); val h = size.height.toFloat()
+                var multi = false
+                var last: Px? = null
+                fun dabAt(o: Offset) {
+                    val v = viewport(w, h)
+                    val p = v.toImage(o)
+                    val r = with(density) { state.brushDp.dp.toPx() } / v.scale
+                    val prev = last
+                    if (prev == null) {
+                        state.addDab(Dab(p.x, p.y, r, state.erasing))
+                    } else {
+                        // Hızlı harekette boşluk kalmasın: aradaki noktaları da damgala
+                        val dist = (p - prev).len()
+                        val n = (dist / (r * 0.4)).toInt().coerceIn(1, 60)
+                        for (i in 1..n) {
+                            val t = i.toDouble() / n
+                            state.addDab(Dab(prev.x + (p.x - prev.x) * t, prev.y + (p.y - prev.y) * t, r, state.erasing))
+                        }
+                    }
+                    last = p
+                }
+                state.beginStroke()
+                dabAt(down.position)
+                down.consume()
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val pressed = event.changes.count { it.pressed }
+                    if (pressed == 0) break
+                    if (pressed >= 2) {
+                        if (!multi) { multi = true; state.cancelStroke() }
+                        applyTransform(event.calculateCentroid(), event.calculatePan(), event.calculateZoom(), w, h)
+                    } else if (!multi) {
+                        event.changes.firstOrNull { it.pressed }?.let { dabAt(it.position) }
+                    }
+                    event.changes.forEach { it.consume() }
+                }
+            }
+        }
+    } else {
+        Modifier
+            .pointerInput(img, "transform") {
+                detectTransformGestures { centroid, dPan, dZoom, _ ->
+                    applyTransform(centroid, dPan, dZoom, size.width.toFloat(), size.height.toFloat())
+                }
+            }
+            .pointerInput(img, "tap") {
+                detectTapGestures { o ->
+                    val p = viewport(size.width.toFloat(), size.height.toFloat()).toImage(o)
+                    if (p.x in 0.0..img.width.toDouble() && p.y in 0.0..img.height.toDouble()) state.tap(p)
+                }
+            }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(
             Modifier.fillMaxWidth().aspectRatio(1f).clipToBounds()
                 .background(Color.Black, RoundedCornerShape(8.dp))
         ) {
-            Canvas(
-                Modifier
-                    .fillMaxSize()
-                    .pointerInput(img) {
-                        detectTransformGestures { centroid, dPan, dZoom, _ ->
-                            val oldZ = zoom
-                            val newZ = (oldZ * dZoom).coerceIn(1f, 12f)
-                            val f = newZ / oldZ
-                            val c = centroid - Offset(size.width / 2f, size.height / 2f)
-                            zoom = newZ
-                            pan = c - (c - pan) * f + dPan
-                        }
-                    }
-                    .pointerInput(img) {
-                        detectTapGestures { o ->
-                            val v = Viewport(size.width.toFloat(), size.height.toFloat(), img.width, img.height, zoom, pan)
-                            val p = v.toImage(o)
-                            if (p.x in 0.0..img.width.toDouble() && p.y in 0.0..img.height.toDouble()) state.place(p)
-                        }
-                    },
-            ) {
+            Canvas(Modifier.fillMaxSize().then(gestures)) {
                 if (size.width < 1f || size.height < 1f) return@Canvas
                 val v = Viewport(size.width, size.height, img.width, img.height, zoom, pan)
                 val tl = v.toScreen(Px(0.0, 0.0))
@@ -501,13 +646,34 @@ private fun MarkCanvas(img: ImageBitmap, state: ImagePlanState) {
                     dstSize = IntSize((img.width * v.scale).toInt().coerceAtLeast(1), (img.height * v.scale).toInt().coerceAtLeast(1)),
                     filterQuality = if (v.scale > 2f) FilterQuality.None else FilterQuality.Medium,
                 )
-                drawOverlay(v, state, measurer)
+                drawPaint(v, state)
+                drawOverlay(v, state, analysis, measurer)
             }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("İki parmakla yakınlaştırın, hassas dokunun.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            Text(
+                if (painting) "Tek parmak boyar, iki parmak yakınlaştırır." else "İki parmakla yakınlaştırın, hassas dokunun.",
+                Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+            )
             if (zoom > 1.01f) TextButton(onClick = { zoom = 1f; pan = Offset.Zero }) { Text("Sığdır") }
         }
+    }
+}
+
+/** Boyamayı yarı saydam tek katman olarak çizer; silgi damgaları katmandan oyar. */
+private fun DrawScope.drawPaint(v: Viewport, s: ImagePlanState) {
+    @Suppress("UNUSED_VARIABLE") val ver = s.maskVersion
+    if (s.dabs.isEmpty()) return
+    val layer = Paint().apply { alpha = 0.45f }
+    drawIntoCanvas { c ->
+        c.saveLayer(Rect(Offset.Zero, size), layer)
+        s.dabs.forEach { d ->
+            val o = v.toScreen(Px(d.x, d.y))
+            val r = (d.r * v.scale).toFloat()
+            if (d.erase) drawCircle(Color.Black, r, o, blendMode = BlendMode.Clear)
+            else drawCircle(LesionColor, r, o)
+        }
+        c.restore()
     }
 }
 
@@ -521,20 +687,31 @@ private class Viewport(w: Float, h: Float, iw: Int, ih: Int, zoom: Float, pan: O
     fun toImage(o: Offset) = Px(icx + (o.x - cx) / scale, icy + (o.y - cy) / scale)
 }
 
-private fun DrawScope.drawOverlay(v: Viewport, s: ImagePlanState, tm: TextMeasurer) {
+private fun DrawScope.drawOverlay(v: Viewport, s: ImagePlanState, a: LesionAnalysis?, tm: TextMeasurer) {
     val dash = PathEffect.dashPathEffect(floatArrayOf(14f, 10f))
-    val e = s.marks[Mark.ENTRY]?.let(v::toScreen)
-    val t = s.marks[Mark.TARGET]?.let(v::toScreen)
-    if (e != null) drawLine(Color.White.copy(alpha = 0.6f), e, Offset(e.x, size.height), 2f, pathEffect = dash)
-    if (e != null && t != null) drawLine(Mark.TARGET.color, e, t, 4f)
-    Mark.entries.forEach { k ->
-        val p = s.marks[k]?.let(v::toScreen) ?: return@forEach
-        val active = s.editing == k
-        drawCircle(Color.Black.copy(alpha = 0.6f), 18f, p, style = Stroke(6f))
-        drawCircle(if (active) Color.White else k.color, 18f, p, style = Stroke(3f))
-        drawCircle(k.color, 2.5f, p)
-        safeLabel(tm, k.label, p + Offset(22f, -30f), k.color)
+    val entry = s.marks[Mark.ENTRY] ?: return
+    val e = v.toScreen(entry)
+    drawLine(Color.White.copy(alpha = 0.6f), e, Offset(e.x, size.height), 2f, pathEffect = dash)
+    if (a != null) {
+        // Hedef doğrultu ve tolerans konisi (iki kenar), lezyonun ötesine kadar uzatılmış
+        val c = v.toScreen(a.centroid)
+        val len = (c - e).getDistance() * 1.25f
+        fun ray(offsetDeg: Double): Offset {
+            val ang = Math.toRadians(a.centerAngleDeg + offsetDeg)
+            return e + Offset((sin(ang) * len).toFloat(), (cos(ang) * len).toFloat())
+        }
+        drawLine(Color.Yellow.copy(alpha = 0.8f), e, ray(a.marginRightDeg), 2f, pathEffect = dash)
+        drawLine(Color.Yellow.copy(alpha = 0.8f), e, ray(-a.marginLeftDeg), 2f, pathEffect = dash)
+        drawLine(LesionColor, e, c, 4f)
+        drawCircle(Color.Black.copy(alpha = 0.6f), 9f, c, style = Stroke(4f))
+        drawCircle(Color.White, 9f, c, style = Stroke(2f))
+        safeLabel(tm, "Merkez", c + Offset(14f, 8f), Color.White)
     }
+    val active = s.movingEntry
+    drawCircle(Color.Black.copy(alpha = 0.6f), 18f, e, style = Stroke(6f))
+    drawCircle(if (active) Color.White else Mark.ENTRY.color, 18f, e, style = Stroke(3f))
+    drawCircle(Mark.ENTRY.color, 2.5f, e)
+    safeLabel(tm, Mark.ENTRY.label, e + Offset(22f, -30f), Mark.ENTRY.color)
 }
 
 /** Ekran dışına taşan etiketler çizilmez (drawText'e negatif alan verilirse uygulama çöker). */

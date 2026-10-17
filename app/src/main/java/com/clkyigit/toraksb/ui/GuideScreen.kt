@@ -149,7 +149,8 @@ fun GuideScreen(
         )
         Text(
             "Tolerans: ±${tolerance.toDouble().f1()}°" +
-                (plan.lesionSizeCm?.let { " (${it.f1()} cm lezyona göre)" } ?: ""),
+                (plan.lesionSizeCm?.let { " (${it.f1()} cm lezyona göre)" }
+                    ?: if (plan.toleranceDeg != null) " (boyanan lezyona göre)" else ""),
             style = MaterialTheme.typography.bodyMedium,
         )
         Slider(value = tolerance, onValueChange = { tolerance = it }, valueRange = 0.5f..10f, steps = 18)
